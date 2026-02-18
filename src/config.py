@@ -51,6 +51,7 @@ class DeepSeekConfig:
     temperature: float = 0.7
     max_tokens: int = 8192
     timeout: int = 120
+    max_concurrent_requests: int = 5  # Parallel API calls limit
     
     def __post_init__(self) -> None:
         """Validate configuration after initialization.
@@ -75,12 +76,15 @@ class PDFProcessorConfig:
         write_images: Whether to extract and save images from PDF.
         page_chunks: Whether to process PDF in page chunks.
         show_progress: Whether to show extraction progress.
+        max_workers: Maximum number of worker threads for parallel processing.
+            If None, uses min(32, cpu_count + 4) as default.
     """
     
     dpi: int = 200
     write_images: bool = True
     page_chunks: bool = True
     show_progress: bool = True
+    max_workers: Optional[int] = None  # Auto-detect if None
 
 
 @dataclass

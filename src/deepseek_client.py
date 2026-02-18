@@ -1,21 +1,25 @@
 """DeepSeek API client for requirements extraction.
 
-This module provides a client for interacting with DeepSeek's chat completion API
-to parse table of contents and extract requirements from technical documents.
+This module provides both sync and async clients for interacting with DeepSeek's
+chat completion API to parse table of contents and extract requirements from
+technical documents.
 
 Classes:
     DeepSeekAPIError: Custom exception for API errors.
-    DeepSeekClient: Main client for API interactions with retry logic.
+    DeepSeekClient: Synchronous client for API interactions with retry logic.
+    AsyncDeepSeekClient: Async client for parallel API calls with asyncio.gather.
 
 Features:
     - Automatic retry with exponential backoff
-    - Rate limit handling
+    - Rate limit handling with semaphore (async)
     - Usage tracking via decorator
     - JSON parsing with error recovery
     - Context manager support
+    - Parallel processing with asyncio.gather
 """
 
 # Standard library imports
+import asyncio
 import json
 import time
 from typing import Any, Dict, List, Optional
@@ -413,3 +417,331 @@ class DeepSeekClient:
             logger.debug(f"Response was: {content}")
             # Return empty list instead of raising to allow processing to continue
             return []
+
+
+class AsyncDeepSeekClient:
+    """Async client for parallel DeepSeek API requests with rate limiting.
+    
+    Provides async methods for parsing TOC and extracting requirements with
+    support for parallel processing using asyncio.gather. Includes automatic
+    rate limiting via semaphore to prevent overwhelming the API.
+    
+    Attributes:
+        config: DeepSeek API configuration.
+        base_url: Base API URL with version.
+        headers: HTTP headers including authorization.
+        client: Async HTTP client instance.
+        semaphore: Asyncio semaphore for rate limiting.
+        model_name: Model name for tracking.
+        provider: Provider name for tracking.
+        current_section: Current section being processed.
+        
+    Example:
+        >>> config = DeepSeekConfig(max_concurrent_requests=5)
+        >>> async with AsyncDeepSeekClient(config) as client:
+        ...     # Parallel extraction
+        ...     tasks = [
+        ...         client.extract_requirements(num, title, range, text)
+        ...         for num, title, range, text in sections
+        ...     ]
+        ...     results = await asyncio.gather(*tasks)
+    """
+    
+    def __init__(self, config: DeepSeekConfig) -> None:
+        """Initialize async DeepSeek API client.
+        
+        Args:
+            config: DeepSeek configuration with API key and max_concurrent_requests.
+        """
+        self.config = config
+        self.base_url = f"{config.base_url}/v1"
+        self.headers = {
+            "Authorization": f"Bearer {config.api_key}",
+            "Content-Type": "application/json",
+        }
+        self.client = httpx.AsyncClient(timeout=config.timeout)
+        self.semaphore = asyncio.Semaphore(config.max_concurrent_requests)
+        self.model_name = config.model
+        self.provider = "deepseek"
+        self.current_section: Optional[str] = None
+    
+    async def __aenter__(self) -> 'AsyncDeepSeekClient':
+        """Async context manager entry."""
+        return self
+    
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit - closes HTTP client."""
+        await self.client.aclose()
+    
+    @track_usage()
+    async def _make_request(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        retry_count: int = 3,
+        retry_delay: float = 1.0,
+    ) -> Dict[str, Any]:
+        """Make async API request with rate limiting and retry logic.
+        
+        Uses semaphore to limit concurrent requests and prevent rate limit errors.
+        
+        Args:
+            messages: List of message dictionaries.
+            temperature: Sampling temperature. If None, uses config default.
+            max_tokens: Maximum tokens. If None, uses config default.
+            retry_count: Number of retry attempts.
+            retry_delay: Base delay between retries (exponential backoff).
+            
+        Returns:
+            Full API response dictionary with usage info.
+            
+        Raises:
+            DeepSeekAPIError: If request fails after all retries.
+        """
+        url = f"{self.base_url}/chat/completions"
+        payload = {
+            "model": self.config.model,
+            "messages": messages,
+            "temperature": temperature or self.config.temperature,
+            "max_tokens": max_tokens or self.config.max_tokens,
+        }
+        
+        async with self.semaphore:  # Rate limiting
+            last_error: Optional[Exception] = None
+            for attempt in range(retry_count):
+                try:
+                    logger.debug(f"Making async API request (attempt {attempt + 1}/{retry_count})")
+                    response = await self.client.post(url, json=payload, headers=self.headers)
+                    response.raise_for_status()
+                    
+                    data = response.json()
+                    logger.debug("Async API request successful")
+                    return data
+                
+                except httpx.HTTPStatusError as e:
+                    last_error = e
+                    logger.warning(
+                        f"HTTP error on attempt {attempt + 1}: {e.response.status_code}"
+                    )
+                    if e.response.status_code == 429:  # Rate limit
+                        await asyncio.sleep(retry_delay * (attempt + 1) * 2)
+                    elif e.response.status_code >= 500:  # Server error
+                        await asyncio.sleep(retry_delay * (attempt + 1))
+                    else:
+                        break
+                
+                except (httpx.RequestError, json.JSONDecodeError) as e:
+                    last_error = e
+                    logger.warning(f"Request error on attempt {attempt + 1}: {str(e)}")
+                    await asyncio.sleep(retry_delay * (attempt + 1))
+            
+            error_msg = f"Failed async API request after {retry_count} attempts: {last_error}"
+            logger.error(error_msg)
+            raise DeepSeekAPIError(error_msg)
+    
+    async def parse_table_of_contents(self, toc_text: str) -> List[TableOfContentsEntry]:
+        """Async parse table of contents from raw text.
+        
+        Args:
+            toc_text: Raw TOC text extracted from PDF.
+            
+        Returns:
+            List of TableOfContentsEntry instances.
+            
+        Raises:
+            DeepSeekAPIError: If API fails or returns invalid JSON.
+        """
+        logger.info("Parsing TOC with async DeepSeek API")
+        self.current_section = "TOC Parsing"
+        
+        # Same prompts as sync version
+        system_prompt = """Ты — эксперт по разбору технических заданий на русском языке.
+У меня есть грязное оглавление из PDF (скопировано из таблицы).
+
+Задача:
+1. Очисти весь мусор (таблицы, инв.№, подписи и т.д.).
+2. Построй иерархическую структуру.
+3. Для каждого раздела укажи page_start (номер страницы начала).
+4. Верни ТОЛЬКО валидный JSON в таком формате:
+
+{
+  "toc": [
+    {
+      "level": 1,
+      "number": "1",
+      "title": "Общие положения",
+      "page_start": 4,
+      "children": []
+    }
+  ]
+}
+
+Будь максимально точен с номерами страниц. Не добавляй ничего лишнего. Верни ТОЛЬКО JSON, без пояснений."""
+        
+        user_prompt = f"""Вот грязное оглавление:
+```
+{toc_text}
+```
+
+Выполни задачу. Верни ТОЛЬКО JSON."""
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        
+        response_data = await self._make_request(messages, temperature=0.3, max_tokens=4096)
+        content = response_data["choices"][0]["message"]["content"]
+        
+        # Parse JSON (same logic as sync)
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start != -1 and end > start:
+                json_str = content[start:end]
+                data = json.loads(json_str)
+            else:
+                data = json.loads(content)
+            
+            toc_entries = [
+                TableOfContentsEntry(
+                    level=entry["level"],
+                    number=entry["number"],
+                    title=entry["title"],
+                    page_start=entry["page_start"],
+                    children=[],
+                )
+                for entry in data.get("toc", [])
+            ]
+            
+            logger.info(f"Successfully parsed {len(toc_entries)} TOC entries")
+            return toc_entries
+        
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Failed to parse TOC response: {e}")
+            raise DeepSeekAPIError(f"Invalid JSON response: {e}")
+    
+    async def extract_requirements(
+        self,
+        section_number: str,
+        section_title: str,
+        page_range: str,
+        section_text: str,
+    ) -> List[Requirement]:
+        """Async extract requirements from a section (for parallel processing).
+        
+        This method is designed to be used with asyncio.gather for parallel
+        extraction across multiple sections.
+        
+        Args:
+            section_number: Section number (e.g., '1.2').
+            section_title: Section title.
+            page_range: Page range string.
+            section_text: Full section text.
+            
+        Returns:
+            List of extracted requirements. Returns empty list on error.
+            
+        Example:
+            >>> tasks = [
+            ...     client.extract_requirements(num, title, range, text)
+            ...     for num, title, range, text in sections
+            ... ]
+            >>> all_requirements = await asyncio.gather(*tasks)
+        """
+        logger.info(f"Async extracting requirements from {section_number} {section_title}")
+        self.current_section = f"{section_number} {section_title}"
+        
+        # Truncate if too long
+        if len(section_text) > 12000:
+            section_text = section_text[:12000] + "\n\n[...текст обрезан...]"
+        
+        system_prompt = f"""Ты — эксперт по извлечению требований из технических заданий.
+Извлеки ВСЕ требования из следующего раздела ТЗ.
+
+Раздел: {section_number} {section_title}
+Страницы: {page_range}
+
+Верни ТОЛЬКО валидный JSON в таком формате:
+{{
+  "requirements": [
+    {{
+      "id": "REQ-{section_number.replace('.', '')}-001",
+      "text": "полный текст требования без сокращений",
+      "type": "Техническое",
+      "priority": "Обязательно",
+      "reference": "ГОСТ 12345 или ссылка из текста или null"
+    }}
+  ]
+}}
+
+Типы требований: "Техническое", "Организационное", "Документационное", "Функциональное", "Нефункциональное", "Прочее"
+Приоритеты: "Обязательно", "Желательно", "Опционально"
+
+Извлекай ВСЕ требования, даже небольшие. Не пропускай детали.
+Верни ТОЛЬКО JSON, без пояснений."""
+        
+        user_prompt = f"""Текст раздела:
+```
+{section_text}
+```
+
+Извлеки все требования из этого раздела."""
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        
+        try:
+            response_data = await self._make_request(messages, temperature=0.5, max_tokens=8192)
+            content = response_data["choices"][0]["message"]["content"]
+            
+            # Parse JSON
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start != -1 and end > start:
+                json_str = content[start:end]
+                data = json.loads(json_str)
+            else:
+                data = json.loads(content)
+            
+            requirements = []
+            for req_data in data.get("requirements", []):
+                try:
+                    # Map type
+                    req_type = RequirementType.OTHER
+                    type_str = req_data.get("type", "")
+                    for rt in RequirementType:
+                        if rt.value in type_str:
+                            req_type = rt
+                            break
+                    
+                    # Map priority
+                    priority = RequirementPriority.MANDATORY
+                    priority_str = req_data.get("priority", "")
+                    for rp in RequirementPriority:
+                        if rp.value in priority_str:
+                            priority = rp
+                            break
+                    
+                    requirement = Requirement(
+                        id=req_data["id"],
+                        text=req_data["text"],
+                        type=req_type,
+                        priority=priority,
+                        reference=req_data.get("reference"),
+                        section=f"{section_number} {section_title}",
+                    )
+                    requirements.append(requirement)
+                except (KeyError, ValueError) as e:
+                    logger.warning(f"Skipping invalid requirement: {e}")
+                    continue
+            
+            logger.info(f"Successfully extracted {len(requirements)} requirements")
+            return requirements
+        
+        except (json.JSONDecodeError, KeyError, DeepSeekAPIError) as e:
+            logger.error(f"Failed to extract requirements: {e}")
+            return []  # Return empty to allow processing to continue

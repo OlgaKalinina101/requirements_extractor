@@ -1,22 +1,27 @@
 """PDF processor for extracting text and structure from PDF documents.
 
 This module provides functionality for extracting text content from PDF files
-using pymupdf4llm with support for progress tracking, image extraction, and
-page-by-page processing.
+using pymupdf4llm with support for multi-threaded processing, progress tracking,
+and image extraction.
 
 Classes:
-    PDFProcessor: Main processor for PDF text extraction.
+    PDFProcessor: Main processor for PDF text extraction with multi-threading.
 
 Features:
-    - Page-by-page extraction with progress callbacks
+    - Multi-threaded parallel page extraction
+    - Progress callbacks with thread-safe updates
     - Image extraction from PDFs
     - Markdown conversion
     - Error recovery (continues on page errors)
+    - Automatic worker count detection
 """
 
 # Standard library imports
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable, List, Optional
+from threading import Lock
+from typing import Callable, Dict, List, Optional, Tuple
 
 # Third-party imports
 import pymupdf
@@ -30,17 +35,18 @@ logger = get_logger(__name__)
 
 
 class PDFProcessor:
-    """Handles PDF document processing and text extraction.
+    """Handles PDF document processing with multi-threaded text extraction.
     
-    Provides methods for extracting text content from PDF files with
-    support for progress tracking and image extraction. Processes PDFs
-    page-by-page to enable real-time progress reporting.
+    Provides methods for extracting text content from PDF files using
+    parallel processing for maximum performance. Automatically determines
+    optimal thread count based on CPU cores.
     
     Attributes:
         config: PDF processor configuration with extraction parameters.
+        max_workers: Number of worker threads for parallel processing.
         
     Example:
-        >>> config = PDFProcessorConfig(dpi=200, write_images=True)
+        >>> config = PDFProcessorConfig(dpi=200, write_images=True, max_workers=4)
         >>> processor = PDFProcessor(config)
         >>> pages = processor.extract_pages(
         ...     Path("doc.pdf"),
@@ -53,9 +59,51 @@ class PDFProcessor:
         """Initialize PDF processor with configuration.
         
         Args:
-            config: PDF processor configuration specifying DPI, image settings, etc.
+            config: PDF processor configuration specifying DPI, image settings,
+                and max_workers for parallel processing.
         """
         self.config = config
+        # Determine optimal worker count
+        self.max_workers = config.max_workers or min(32, (os.cpu_count() or 1) + 4)
+        logger.info(f"PDF processor initialized with {self.max_workers} worker threads")
+    
+    def _extract_single_page(
+        self,
+        pdf_path: Path,
+        page_num: int,
+        image_dir: Path
+    ) -> Tuple[int, Optional[str]]:
+        """Extract text from a single PDF page (thread-safe).
+        
+        This method is called by worker threads in parallel.
+        
+        Args:
+            pdf_path: Path to PDF file.
+            page_num: Page number to extract (0-indexed).
+            image_dir: Directory for saving images.
+            
+        Returns:
+            Tuple of (page_num, extracted_text) where text is None if extraction failed.
+        """
+        try:
+            chunk = pymupdf4llm.to_markdown(
+                str(pdf_path),
+                page_chunks=True,
+                pages=[page_num],
+                write_images=self.config.write_images,
+                image_path=str(image_dir),
+                dpi=self.config.dpi,
+                show_progress=False  # Disable internal progress bar
+            )
+            
+            if chunk:
+                text = chunk[0].get("text", "")
+                return (page_num, text)
+            return (page_num, "")
+            
+        except Exception as e:
+            logger.warning(f"Failed to process page {page_num}: {e}")
+            return (page_num, None)
     
     def extract_pages(
         self, 
@@ -63,27 +111,28 @@ class PDFProcessor:
         image_dir: Path,
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> List[str]:
-        """Extract text from PDF file page by page with progress tracking.
+        """Extract text from PDF file using multi-threaded parallel processing.
         
-        Processes each page individually to enable real-time progress reporting.
-        Automatically handles images if configured, and continues processing even
-        if individual pages fail.
+        Processes multiple pages simultaneously for maximum performance.
+        Progress callback is called in a thread-safe manner.
         
         Args:
             pdf_path: Path to PDF file to process.
             image_dir: Directory where extracted images will be saved.
-            progress_callback: Optional callback function called after each page.
-                Receives (current_page, total_pages) as arguments.
+            progress_callback: Optional callback function called after each page completes.
+                Receives (current_page, total_pages) as arguments. Thread-safe.
         
         Returns:
             List of strings, one per page, containing extracted text in markdown format.
+            Pages are returned in order even though extraction is parallel.
             
         Raises:
             FileNotFoundError: If PDF file doesn't exist at specified path.
             
         Note:
-            If a page fails to process, a warning is logged and processing continues
-            with remaining pages.
+            - Uses ThreadPoolExecutor with auto-detected worker count
+            - Failed pages return empty strings to maintain page order
+            - Progress callback is called from worker threads (ensure thread-safety)
             
         Example:
             >>> def progress(current, total):
@@ -93,63 +142,65 @@ class PDFProcessor:
             ...     Path("images/"),
             ...     progress_callback=progress
             ... )
-            >>> print(f"Extracted {len(pages)} pages")
+            >>> print(f"Extracted {len(pages)} pages in parallel")
         """
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
         
         logger.info(f"Extracting text from PDF: {pdf_path}")
         logger.info(f"Images will be saved to: {image_dir}")
+        logger.info(f"Using {self.max_workers} worker threads for parallel extraction")
         
         # Create image directory
         image_dir.mkdir(parents=True, exist_ok=True)
         
-        # Get total pages first for progress tracking
+        # Get total pages
         doc = pymupdf.open(pdf_path)
         total_pages = len(doc)
         doc.close()
         
-        logger.info(f"PDF has {total_pages} pages")
+        logger.info(f"PDF has {total_pages} pages - starting parallel extraction")
         
-        # Extract markdown by page with progress
-        doc_chunks = []
-        pages_processed = 0
+        # Thread-safe progress tracking
+        progress_lock = Lock()
+        pages_completed = [0]  # Use list for mutability in closure
         
-        # Process page by page to show progress
-        for page_num in range(total_pages):
-            try:
-                # Extract single page
-                chunk = pymupdf4llm.to_markdown(
-                    str(pdf_path),
-                    page_chunks=True,
-                    pages=[page_num],
-                    write_images=self.config.write_images,
-                    image_path=str(image_dir),
-                    dpi=self.config.dpi,
-                    show_progress=False  # Disable internal progress bar
-                )
-                
-                if chunk:
-                    doc_chunks.extend(chunk)
-                
-                pages_processed += 1
-                
-                # Call progress callback after each page
+        def report_progress() -> None:
+            """Thread-safe progress reporting."""
+            with progress_lock:
+                pages_completed[0] += 1
+                current = pages_completed[0]
                 if progress_callback:
-                    progress_callback(pages_processed, total_pages)
-                
-                # Log every 10 pages or first/last page
-                if pages_processed % 10 == 0 or pages_processed == 1 or pages_processed == total_pages:
-                    logger.info(f"[PDF_PROCESSOR] Processed {pages_processed}/{total_pages} pages")
-                
-            except Exception as e:
-                logger.warning(f"Failed to process page {page_num}: {e}")
-                continue
+                    progress_callback(current, total_pages)
+                # Log every 10 pages
+                if current % 10 == 0 or current == 1 or current == total_pages:
+                    logger.info(f"[PDF_PROCESSOR] Processed {current}/{total_pages} pages")
         
-        # Extract text from chunks
-        pages = [chunk.get("text", "") for chunk in doc_chunks]
+        # Store results by page number to maintain order
+        results: Dict[int, Optional[str]] = {}
         
-        logger.info(f"Successfully extracted {len(pages)} pages from PDF")
+        # Process pages in parallel
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all pages for processing
+            future_to_page = {
+                executor.submit(self._extract_single_page, pdf_path, page_num, image_dir): page_num
+                for page_num in range(total_pages)
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_page):
+                page_num, text = future.result()
+                results[page_num] = text if text is not None else ""
+                report_progress()
+        
+        # Reconstruct pages in order
+        pages = [results.get(i, "") for i in range(total_pages)]
+        
+        successful = sum(1 for p in pages if p)
+        logger.info(f"Successfully extracted {successful}/{total_pages} pages from PDF")
+        
+        if successful < total_pages:
+            logger.warning(f"{total_pages - successful} pages failed to extract")
         
         return pages
     
