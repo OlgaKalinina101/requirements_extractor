@@ -30,6 +30,19 @@
 
 ---
 
+## 💻 Примеры интерфейса
+
+<div align="center">
+
+<p align="center">
+  <img src="img/input.jpg" width="400" />
+  <img src="img/output.jpg" width="400" />
+</p>
+
+</div>
+
+---
+
 ## 🎯 Быстрый старт
 
 ### Самый простой способ (Windows)
