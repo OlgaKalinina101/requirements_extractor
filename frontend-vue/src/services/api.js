@@ -21,14 +21,18 @@ export const projectsApi = {
     formData.append('name', name)
     if (code) formData.append('code', code)
     if (description) formData.append('description', description)
-    return api.post('/api/projects', formData)
+    return api.post('/api/projects', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
   },
   update: (id, data) => {
     const formData = new FormData()
     Object.entries(data).forEach(([key, value]) => {
       if (value !== null && value !== undefined) formData.append(key, value)
     })
-    return api.put(`/api/projects/${id}`, formData)
+    return api.put(`/api/projects/${id}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
   },
   delete: (id) => api.delete(`/api/projects/${id}`),
 }

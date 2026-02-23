@@ -28,8 +28,8 @@
 
 ```bash
 # 1. Клонировать и настроить
-git clone <repo-url>
-cd test2
+git clone https://github.com/OlgaKalinina101/requirements_extractor.git
+cd requirements_extractor
 cp .env.example .env
 # Отредактировать .env — вписать OPENROUTER_API_KEY
 
@@ -41,6 +41,12 @@ docker-compose up -d
 ```
 
 Поднимается три контейнера: PostgreSQL, API (FastAPI), Frontend (Vue + Nginx).
+
+Посмотреть логи:
+
+```bash
+docker logs requirements-extractor-api 2>&1 | Select-String -Pattern "extract|POST|ERROR|error|document|DB|traceback|Exception" -CaseSensitive:$false | Select-Object -Last 50
+```
 
 ---
 

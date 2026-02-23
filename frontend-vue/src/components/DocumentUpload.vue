@@ -77,7 +77,7 @@ const props = defineProps({
   projectId: { type: [String, Number], default: null }
 })
 
-const emit = defineEmits(['uploaded'])
+const emit = defineEmits(['uploaded', 'results-shown', 'results-hidden'])
 
 const documentsStore = useDocumentsStore()
 const router = useRouter()
@@ -173,10 +173,10 @@ const handleUpload = async () => {
     extractionResults.value = result
     emit('uploaded', result)
     
-    setTimeout(() => {
-      uploading.value = false
-      showResults.value = true
-    }, 1000)
+    // Set states immediately without setTimeout
+    uploading.value = false
+    showResults.value = true
+    emit('results-shown')
     
   } catch (error) {
     console.error('Upload failed:', error)
@@ -203,5 +203,6 @@ const resetUpload = () => {
   showResults.value = false
   extractionResults.value = null
   file.value = null
+  emit('results-hidden')
 }
 </script>

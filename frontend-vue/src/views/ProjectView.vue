@@ -39,13 +39,18 @@
       </v-row>
 
       <v-row>
-        <!-- Upload column -->
-        <v-col cols="12" md="8">
-          <DocumentUpload :project-id="projectId" @uploaded="onDocumentUploaded" />
+        <!-- Upload column - full width when showing results -->
+        <v-col :cols="12" :md="showingResults ? 12 : 8">
+          <DocumentUpload 
+            :project-id="projectId" 
+            @uploaded="onDocumentUploaded"
+            @results-shown="onResultsShown"
+            @results-hidden="onResultsHidden"
+          />
         </v-col>
 
-        <!-- Documents list column -->
-        <v-col cols="12" md="4">
+        <!-- Documents list column - hidden when showing results -->
+        <v-col v-if="!showingResults" cols="12" md="4">
           <v-card>
             <v-card-title>
               <v-icon left>mdi-file-document-multiple</v-icon>
@@ -115,6 +120,7 @@ const props = defineProps({
 
 const loading = ref(false)
 const project = ref(null)
+const showingResults = ref(false)
 
 const breadcrumbs = computed(() => [
   { title: 'Проекты', to: '/projects', disabled: false },
@@ -134,6 +140,17 @@ const refreshProject = async () => {
 }
 
 const onDocumentUploaded = () => {
+  // Don't refresh immediately - it will reset DocumentUpload component state
+  // refreshProject() will be called when user closes ExtractionResults
+}
+
+const onResultsShown = () => {
+  showingResults.value = true
+}
+
+const onResultsHidden = () => {
+  showingResults.value = false
+  // Refresh project list after closing results
   refreshProject()
 }
 

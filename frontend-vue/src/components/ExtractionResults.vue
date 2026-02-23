@@ -16,28 +16,28 @@
       <v-row>
         <v-col cols="6" md="3">
           <div class="stat-item">
-            <div class="stat-value">{{ results.requirements_count }}</div>
+            <div class="stat-value">{{ results.requirements_count || 0 }}</div>
             <div class="stat-label">Требований</div>
           </div>
         </v-col>
         
         <v-col cols="6" md="3">
           <div class="stat-item">
-            <div class="stat-value">{{ results.sections_count }}</div>
+            <div class="stat-value">{{ results.sections_count || 0 }}</div>
             <div class="stat-label">Секций</div>
           </div>
         </v-col>
         
         <v-col cols="6" md="3">
           <div class="stat-item">
-            <div class="stat-value">{{ formatNumber(results.total_tokens) }}</div>
+            <div class="stat-value">{{ formatNumber(results.total_tokens || 0) }}</div>
             <div class="stat-label">Токенов</div>
           </div>
         </v-col>
         
         <v-col cols="6" md="3">
           <div class="stat-item">
-            <div class="stat-value">${{ results.total_cost.toFixed(4) }}</div>
+            <div class="stat-value">${{ (results.total_cost || 0).toFixed(4) }}</div>
             <div class="stat-label">Стоимость</div>
           </div>
         </v-col>
@@ -46,7 +46,7 @@
       <v-row class="mt-2">
         <v-col cols="12" md="6">
           <div class="stat-item">
-            <div class="stat-value">{{ results.processing_time.toFixed(1) }}с</div>
+            <div class="stat-value">{{ (results.processing_time || 0).toFixed(1) }}с</div>
             <div class="stat-label">Время обработки</div>
           </div>
         </v-col>
