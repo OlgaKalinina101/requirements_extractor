@@ -1,0 +1,306 @@
+<template>
+  <div class="review-container">
+    <!-- Header -->
+    <v-card class="mb-2">
+      <v-card-title class="d-flex align-center">
+        <v-icon left>mdi-file-document-edit</v-icon>
+        Review требований
+        <v-spacer></v-spacer>
+        <v-chip v-if="documentsStore.currentDocument" class="mr-4" size="small">
+          {{ documentsStore.currentDocument.filename }}
+        </v-chip>
+        <v-btn
+          icon
+          variant="text"
+          @click="$router.push('/')"
+        >
+          <v-icon>mdi-arrow-left</v-icon>
+        </v-btn>
+      </v-card-title>
+    </v-card>
+
+    <!-- Split View: PDF Viewer + Requirements -->
+    <v-row class="fill-height ma-0">
+      <!-- Left: PDF Viewer -->
+      <v-col cols="12" md="6" class="pa-1" style="height: calc(100vh - 140px)">
+        <PDFViewer
+          v-if="documentsStore.currentDocument"
+          :document-id="documentsStore.currentDocument.id"
+          :filename="documentsStore.currentDocument.filename"
+          :initial-page="currentPdfPage"
+          :total-pages-count="documentsStore.currentDocument.total_pages || 0"
+          @page-changed="onPdfPageChanged"
+          @loaded="onPdfLoaded"
+          ref="pdfViewer"
+        />
+      </v-col>
+
+      <!-- Right: Requirements List + Sidebar -->
+      <v-col cols="12" md="6" class="pa-1 d-flex flex-column" style="height: calc(100vh - 140px)">
+        <v-row class="ma-0 flex-grow-1">
+          <!-- Requirements List -->
+          <v-col cols="12" lg="8" class="pa-1 d-flex flex-column">
+            <v-card class="d-flex flex-column" style="height: 100%;">
+              <v-card-title class="flex-shrink-0">
+                <v-icon left>mdi-clipboard-list</v-icon>
+                Требования
+                <v-spacer></v-spacer>
+                <v-chip size="small" color="primary">
+                  {{ requirementsStore.filteredRequirements.length }} / {{ requirementsStore.requirements.length }}
+                </v-chip>
+              </v-card-title>
+              
+              <v-card-text class="pa-2 requirements-scroll-container" style="flex: 1 1 auto; overflow-y: auto; height: 0;">
+                <div v-if="requirementsStore.loading" class="text-center py-8">
+                  <v-progress-circular indeterminate color="primary"></v-progress-circular>
+                </div>
+                
+                <div v-else-if="requirementsStore.filteredRequirements.length === 0" class="text-center py-8">
+                  <v-icon size="64" color="grey">mdi-file-document-remove</v-icon>
+                  <div class="text-h6 mt-4">Нет требований</div>
+                  <div class="text-body-2 text-medium-emphasis">
+                    {{ requirementsStore.requirements.length > 0 ? 'Измените фильтры' : 'Требования появятся после обработки документа' }}
+                  </div>
+                </div>
+                
+                <RequirementsList
+                  v-else
+                  :requirements="requirementsStore.filteredRequirements"
+                  @accept="handleAccept"
+                  @reject="handleReject"
+                  @edit="handleEdit"
+                  @view-page="jumpToPdfPage"
+                />
+              </v-card-text>
+            </v-card>
+          </v-col>
+
+          <!-- Filters & Stats Sidebar -->
+          <v-col cols="12" lg="4" class="pa-1 d-flex flex-column">
+            <!-- Filters -->
+            <v-card class="mb-2">
+              <v-card-title class="text-body-1">
+                <v-icon left size="small">mdi-filter</v-icon>
+                Фильтры
+              </v-card-title>
+              <v-card-text class="py-2">
+                <v-select
+                  v-model="statusFilter"
+                  :items="statusOptions"
+                  label="Статус"
+                  density="compact"
+                  clearable
+                  @update:model-value="updateFilters"
+                ></v-select>
+                
+                <v-select
+                  v-model="typeFilter"
+                  :items="typeOptions"
+                  label="Тип"
+                  density="compact"
+                  clearable
+                  @update:model-value="updateFilters"
+                  class="mt-2"
+                ></v-select>
+              </v-card-text>
+            </v-card>
+            
+            <!-- Statistics -->
+            <v-card class="mb-2">
+              <v-card-title class="text-body-1">
+                <v-icon left size="small">mdi-chart-bar</v-icon>
+                Статистика
+              </v-card-title>
+              <v-card-text class="py-2">
+                <v-list density="compact">
+                  <v-list-item class="px-0">
+                    <v-list-item-title class="text-body-2">Всего</v-list-item-title>
+                    <template v-slot:append>
+                      <strong>{{ requirementsStore.stats.total }}</strong>
+                    </template>
+                  </v-list-item>
+                  <v-divider class="my-1"></v-divider>
+                  <v-list-item class="px-0">
+                    <v-list-item-title class="text-body-2">Pending</v-list-item-title>
+                    <template v-slot:append>
+                      <v-chip size="x-small" color="grey">{{ requirementsStore.stats.pending }}</v-chip>
+                    </template>
+                  </v-list-item>
+                  <v-list-item class="px-0">
+                    <v-list-item-title class="text-body-2">Accepted</v-list-item-title>
+                    <template v-slot:append>
+                      <v-chip size="x-small" color="green">{{ requirementsStore.stats.accepted }}</v-chip>
+                    </template>
+                  </v-list-item>
+                  <v-list-item class="px-0">
+                    <v-list-item-title class="text-body-2">Modified</v-list-item-title>
+                    <template v-slot:append>
+                      <v-chip size="x-small" color="blue">{{ requirementsStore.stats.modified }}</v-chip>
+                    </template>
+                  </v-list-item>
+                  <v-list-item class="px-0">
+                    <v-list-item-title class="text-body-2">Rejected</v-list-item-title>
+                    <template v-slot:append>
+                      <v-chip size="x-small" color="red">{{ requirementsStore.stats.rejected }}</v-chip>
+                    </template>
+                  </v-list-item>
+                </v-list>
+              </v-card-text>
+            </v-card>
+
+            <!-- Metrics Panel -->
+            <MetricsPanel
+              v-if="documentsStore.currentDocument"
+              :document-id="documentsStore.currentDocument.id"
+              class="flex-grow-1"
+            />
+          </v-col>
+        </v-row>
+      </v-col>
+    </v-row>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { useDocumentsStore } from '../stores/documents'
+import { useRequirementsStore } from '../stores/requirements'
+import RequirementsList from '../components/RequirementsList.vue'
+import PDFViewer from '../components/PDFViewer.vue'
+import MetricsPanel from '../components/MetricsPanel.vue'
+
+const route = useRoute()
+const documentsStore = useDocumentsStore()
+const requirementsStore = useRequirementsStore()
+
+const pdfViewer = ref(null)
+const currentPdfPage = ref(1)
+const statusFilter = ref(null)
+const typeFilter = ref(null)
+
+const statusOptions = [
+  { title: 'Pending', value: 'pending' },
+  { title: 'Accepted', value: 'accepted' },
+  { title: 'Rejected', value: 'rejected' },
+  { title: 'Modified', value: 'modified' }
+]
+
+const typeOptions = [
+  { title: 'Техническое', value: 'Техническое' },
+  { title: 'Функциональное', value: 'Функциональное' },
+  { title: 'Организационное', value: 'Организационное' },
+  { title: 'Документационное', value: 'Документационное' },
+  { title: 'Нефункциональное', value: 'Нефункциональное' },
+  { title: 'Прочее', value: 'Прочее' }
+]
+
+const updateFilters = () => {
+  requirementsStore.setFilters({
+    status: statusFilter.value,
+    type: typeFilter.value
+  })
+}
+
+const handleAccept = async (requirementId) => {
+  try {
+    await requirementsStore.acceptRequirement(requirementId)
+  } catch (error) {
+    console.error('Failed to accept requirement:', error)
+  }
+}
+
+const handleReject = async (requirementId, reason) => {
+  try {
+    await requirementsStore.rejectRequirement(requirementId, reason)
+  } catch (error) {
+    console.error('Failed to reject requirement:', error)
+  }
+}
+
+const handleEdit = async (requirementId, editedText, reason) => {
+  try {
+    await requirementsStore.editRequirement(requirementId, editedText, reason)
+  } catch (error) {
+    console.error('Failed to edit requirement:', error)
+  }
+}
+
+const jumpToPdfPage = (pageNumber) => {
+  if (pdfViewer.value && pageNumber) {
+    currentPdfPage.value = pageNumber
+    pdfViewer.value.jumpToPage(pageNumber)
+  }
+}
+
+const onPdfPageChanged = (page) => {
+  currentPdfPage.value = page
+}
+
+const onPdfLoaded = () => {
+  console.log('PDF loaded')
+}
+
+const loadData = async () => {
+  const documentId = route.params.documentId
+  if (documentId) {
+    try {
+      await documentsStore.fetchDocument(documentId)
+      await requirementsStore.fetchRequirements(documentId)
+      
+      // Jump to first requirement's page after loading
+      const firstRequirement = requirementsStore.filteredRequirements[0]
+      if (firstRequirement && firstRequirement.page_number) {
+        console.log(`📄 Jumping to first requirement's page: ${firstRequirement.page_number}`)
+        currentPdfPage.value = firstRequirement.page_number
+        // PDF viewer will use this initial page when it loads
+      }
+    } catch (error) {
+      console.error('Failed to load data:', error)
+    }
+  }
+}
+
+onMounted(() => {
+  loadData()
+})
+
+watch(() => route.params.documentId, () => {
+  loadData()
+})
+</script>
+
+<style scoped>
+.review-container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.requirements-scroll-container {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+.requirements-scroll-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.requirements-scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.requirements-scroll-container::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.requirements-scroll-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+</style>

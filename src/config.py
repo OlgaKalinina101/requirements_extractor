@@ -27,22 +27,44 @@ load_dotenv()
 
 
 @dataclass
+class OpenRouterConfig:
+    """Configuration for OpenRouter API integration.
+    
+    Attributes:
+        api_key: OpenRouter API key
+        api_url: OpenRouter API endpoint
+        model: Selected model ID
+        referer: Referer URL for OpenRouter
+        title: Application title for OpenRouter
+        temperature: Temperature parameter
+        max_tokens: Maximum tokens in response
+    """
+    api_key: str = field(default_factory=lambda: os.getenv("OPENROUTER_API_KEY", ""))
+    api_url: str = "https://openrouter.ai/api/v1/chat/completions"
+    model: str = field(default_factory=lambda: os.getenv("MODEL", "claude-sonnet-4.5"))
+    referer: Optional[str] = field(default_factory=lambda: os.getenv("OPENROUTER_REFERER"))
+    title: Optional[str] = field(default_factory=lambda: os.getenv("OPENROUTER_TITLE"))
+    temperature: float = 0.1
+    max_tokens: int = 4000
+
+
+@dataclass
 class DeepSeekConfig:
-    """Configuration for DeepSeek API client.
+    """Configuration for DeepSeek API client (legacy, deprecated).
     
     Loads API credentials from environment variables and provides
     default values for model parameters.
     
+    Note: This is legacy support. OpenRouter is recommended instead.
+    Validation of API key happens only when DeepSeek is actually used.
+    
     Attributes:
-        api_key: DeepSeek API key from environment.
+        api_key: DeepSeek API key from environment (optional if not using DeepSeek).
         base_url: Base URL for DeepSeek API.
         model: Model name to use for completions.
         temperature: Sampling temperature (0-1).
         max_tokens: Maximum tokens per completion.
         timeout: Request timeout in seconds.
-        
-    Raises:
-        ValueError: If DEEPSEEK_API_KEY is not set.
     """
     
     api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
@@ -56,13 +78,12 @@ class DeepSeekConfig:
     def __post_init__(self) -> None:
         """Validate configuration after initialization.
         
-        Raises:
-            ValueError: If API key is not found in environment.
+        Note: Validation is skipped if DeepSeek is not the active provider.
+        This allows the config to exist without a key when using OpenRouter.
         """
-        if not self.api_key:
-            raise ValueError(
-                "DEEPSEEK_API_KEY not found. Please set it in .env file or environment variables."
-            )
+        # Validation is done at runtime when DeepSeek is actually used
+        # Don't validate here to allow config creation without key
+        pass
 
 
 @dataclass
@@ -74,6 +95,7 @@ class PDFProcessorConfig:
     Attributes:
         dpi: Image resolution for PDF rendering.
         write_images: Whether to extract and save images from PDF.
+        image_format: Format for extracted images (png, jpg, etc).
         page_chunks: Whether to process PDF in page chunks.
         show_progress: Whether to show extraction progress.
         max_workers: Maximum number of worker threads for parallel processing.
@@ -82,6 +104,7 @@ class PDFProcessorConfig:
     
     dpi: int = 200
     write_images: bool = True
+    image_format: str = "png"
     page_chunks: bool = True
     show_progress: bool = True
     max_workers: Optional[int] = None  # Auto-detect if None
@@ -113,6 +136,8 @@ class ApplicationConfig:
     
     # API Configuration
     deepseek: DeepSeekConfig = field(default_factory=DeepSeekConfig)
+    openrouter: OpenRouterConfig = field(default_factory=OpenRouterConfig)
+    provider: str = field(default_factory=lambda: os.getenv("PROVIDER", "openrouter").lower())
     
     # PDF Processing
     pdf_processor: PDFProcessorConfig = field(default_factory=PDFProcessorConfig)
@@ -164,3 +189,30 @@ def get_config() -> ApplicationConfig:
         ValueError: If required environment variables are missing.
     """
     return ApplicationConfig()
+
+
+def load_from_env() -> ApplicationConfig:
+    """Load configuration from environment variables.
+    
+    Environment variables:
+        OPENROUTER_API_KEY: OpenRouter API key (required for openrouter provider)
+        DEEPSEEK_API_KEY: DeepSeek API key (required for deepseek provider)
+        OPENROUTER_REFERER: Referer for OpenRouter
+        OPENROUTER_TITLE: Title for OpenRouter
+        PROVIDER: AI provider ("openrouter" or "deepseek")
+        MODEL: Default model to use
+        LOG_LEVEL: Logging level
+        
+    Returns:
+        ApplicationConfig instance with loaded values
+    """
+    config = ApplicationConfig()
+    
+    # Provider selection
+    config.provider = os.getenv("PROVIDER", "openrouter").lower()
+    
+    # Model selection
+    if os.getenv("MODEL"):
+        config.openrouter.model = os.getenv("MODEL")
+    
+    return config

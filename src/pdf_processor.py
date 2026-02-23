@@ -72,8 +72,8 @@ class PDFProcessor:
         pdf_path: Path,
         page_num: int,
         image_dir: Path
-    ) -> Tuple[int, Optional[str]]:
-        """Extract text from a single PDF page (thread-safe).
+    ) -> Tuple[int, Optional[str], List[Dict]]:
+        """Extract text and image metadata from a single PDF page (thread-safe).
         
         This method is called by worker threads in parallel.
         
@@ -83,8 +83,13 @@ class PDFProcessor:
             image_dir: Directory for saving images.
             
         Returns:
-            Tuple of (page_num, extracted_text) where text is None if extraction failed.
+            Tuple of (page_num, extracted_text, image_metadata_list) where:
+            - page_num: Page number (0-indexed)
+            - text: Extracted text or None if failed
+            - image_metadata: List of dicts with image info (filename, page, index)
         """
+        image_metadata = []
+        
         try:
             chunk = pymupdf4llm.to_markdown(
                 str(pdf_path),
@@ -97,21 +102,112 @@ class PDFProcessor:
             )
             
             if chunk:
-                text = chunk[0].get("text", "")
-                return (page_num, text)
-            return (page_num, "")
+                chunk_data = chunk[0]
+                text = chunk_data.get("text", "")
+                
+                # Extract image metadata from chunk
+                if self.config.write_images and "images" in chunk_data:
+                    images_info = chunk_data.get("images", [])
+                    page_number_1based = page_num + 1  # Convert to 1-based
+                    
+                    for img_idx, img_info in enumerate(images_info):
+                        # Find corresponding image file in directory
+                        # pymupdf4llm saves images as: {filename}-p{page}-img{idx}.{ext}
+                        pdf_name = pdf_path.stem
+                        image_ext = self.config.image_format
+                        
+                        # Try to find the image file — multiple strategies
+                        old_path = None
+                        
+                        # Strategy 1: exact match (0-indexed page)
+                        for ext in ['png', 'jpg', 'jpeg']:
+                            candidate = image_dir / f"{pdf_name}-p{page_num}-img{img_idx}.{ext}"
+                            if candidate.exists():
+                                old_path = candidate
+                                image_ext = ext
+                                break
+                        
+                        # Strategy 2: 1-indexed page (some pymupdf4llm versions)
+                        if not old_path:
+                            for ext in ['png', 'jpg', 'jpeg']:
+                                candidate = image_dir / f"{pdf_name}-p{page_num + 1}-img{img_idx}.{ext}"
+                                if candidate.exists():
+                                    old_path = candidate
+                                    image_ext = ext
+                                    break
+                        
+                        # Strategy 3: glob fallback — any file matching page+img index
+                        if not old_path:
+                            patterns = [
+                                f"*p{page_num}*img{img_idx}*",
+                                f"*p{page_num + 1}*img{img_idx}*",
+                                f"*{page_num}*{img_idx}*",
+                            ]
+                            for pat in patterns:
+                                found = list(image_dir.glob(pat))
+                                if found:
+                                    old_path = found[0]
+                                    image_ext = old_path.suffix.lstrip('.')
+                                    logger.debug(f"Found image via glob '{pat}': {old_path.name}")
+                                    break
+                        
+                        if old_path is None:
+                            # Log all files in dir to help debug
+                            all_files = list(image_dir.iterdir()) if image_dir.exists() else []
+                            logger.debug(
+                                f"Image not found for page {page_num}, img {img_idx}. "
+                                f"Files in dir: {[f.name for f in all_files[:10]]}"
+                            )
+                        
+                        if old_path and old_path.exists():
+                            # Rename to our format: page_X_image_Y.ext
+                            new_filename = f"page_{page_number_1based}_image_{img_idx + 1}.{image_ext}"
+                            new_path = image_dir / new_filename
+                            
+                            try:
+                                old_path.rename(new_path)
+                                logger.debug(f"Renamed image: {old_path.name} → {new_filename}")
+                                
+                                image_metadata.append({
+                                    "filename": new_filename,
+                                    "path": str(new_path),
+                                    "page_number": page_number_1based,
+                                    "image_index": img_idx + 1,
+                                    "width": img_info.get("width"),
+                                    "height": img_info.get("height"),
+                                    "xref": img_info.get("xref"),
+                                    "ext": image_ext
+                                })
+                            except Exception as e:
+                                logger.warning(f"Failed to rename image {old_path.name}: {e}")
+                                # Still add metadata with old filename
+                                image_metadata.append({
+                                    "filename": old_path.name,
+                                    "path": str(old_path),
+                                    "page_number": page_number_1based,
+                                    "image_index": img_idx + 1,
+                                    "width": img_info.get("width"),
+                                    "height": img_info.get("height"),
+                                    "xref": img_info.get("xref"),
+                                    "ext": image_ext
+                                })
+                        else:
+                            logger.debug(f"Image file not found for page {page_number_1based}, image {img_idx}")
+                
+                return (page_num, text, image_metadata)
+            return (page_num, "", [])
             
         except Exception as e:
             logger.warning(f"Failed to process page {page_num}: {e}")
-            return (page_num, None)
+            return (page_num, None, [])
     
     def extract_pages(
         self, 
         pdf_path: Path, 
         image_dir: Path,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> List[str]:
-        """Extract text from PDF file using multi-threaded parallel processing.
+    ) -> Tuple[List[str], Dict[int, List[Dict]]]:
+        """Extract text and images from PDF file using multi-threaded parallel processing.
         
         Processes multiple pages simultaneously for maximum performance.
         Progress callback is called in a thread-safe manner.
@@ -123,8 +219,9 @@ class PDFProcessor:
                 Receives (current_page, total_pages) as arguments. Thread-safe.
         
         Returns:
-            List of strings, one per page, containing extracted text in markdown format.
-            Pages are returned in order even though extraction is parallel.
+            Tuple of (pages, image_metadata) where:
+            - pages: List of strings, one per page, containing extracted text in markdown format
+            - image_metadata: Dict mapping page_number (1-based) to list of image metadata dicts
             
         Raises:
             FileNotFoundError: If PDF file doesn't exist at specified path.
@@ -133,21 +230,22 @@ class PDFProcessor:
             - Uses ThreadPoolExecutor with auto-detected worker count
             - Failed pages return empty strings to maintain page order
             - Progress callback is called from worker threads (ensure thread-safety)
+            - Images are renamed to format: page_X_image_Y.ext
             
         Example:
             >>> def progress(current, total):
             ...     print(f"Processing {current}/{total}")
-            >>> pages = processor.extract_pages(
+            >>> pages, images = processor.extract_pages(
             ...     Path("spec.pdf"),
             ...     Path("images/"),
             ...     progress_callback=progress
             ... )
-            >>> print(f"Extracted {len(pages)} pages in parallel")
+            >>> print(f"Extracted {len(pages)} pages and {sum(len(imgs) for imgs in images.values())} images")
         """
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
         
-        logger.info(f"Extracting text from PDF: {pdf_path}")
+        logger.info(f"Extracting text and images from PDF: {pdf_path}")
         logger.info(f"Images will be saved to: {image_dir}")
         logger.info(f"Using {self.max_workers} worker threads for parallel extraction")
         
@@ -178,6 +276,7 @@ class PDFProcessor:
         
         # Store results by page number to maintain order
         results: Dict[int, Optional[str]] = {}
+        image_results: Dict[int, List[Dict]] = {}
         
         # Process pages in parallel
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -189,20 +288,25 @@ class PDFProcessor:
             
             # Collect results as they complete
             for future in as_completed(future_to_page):
-                page_num, text = future.result()
+                page_num, text, image_metadata = future.result()
                 results[page_num] = text if text is not None else ""
+                # Store images by 1-based page number
+                page_number_1based = page_num + 1
+                image_results[page_number_1based] = image_metadata
                 report_progress()
         
         # Reconstruct pages in order
         pages = [results.get(i, "") for i in range(total_pages)]
         
         successful = sum(1 for p in pages if p)
-        logger.info(f"Successfully extracted {successful}/{total_pages} pages from PDF")
+        total_images = sum(len(imgs) for imgs in image_results.values())
+        
+        logger.info(f"Successfully extracted {successful}/{total_pages} pages and {total_images} images from PDF")
         
         if successful < total_pages:
             logger.warning(f"{total_pages - successful} pages failed to extract")
         
-        return pages
+        return pages, image_results
     
     def get_section_text(
         self,

@@ -71,8 +71,11 @@ class Requirement:
         type: Classification of requirement type.
         priority: Implementation priority level.
         reference: Optional reference to standards/documents.
-        page_number: Optional page number where found.
-        section: Optional section identifier.
+        page_number: Optional page number where found (deprecated, use source_page).
+        section: Optional section identifier (deprecated, use section_number).
+        source_page: Page number where requirement was found (1-based).
+        section_number: Section identifier (e.g., '3.2.1').
+        source_type: Source of requirement - 'text' or 'image'.
     """
     
     id: str
@@ -80,8 +83,11 @@ class Requirement:
     type: RequirementType
     priority: RequirementPriority = RequirementPriority.MANDATORY
     reference: Optional[str] = None
-    page_number: Optional[int] = None
-    section: Optional[str] = None
+    page_number: Optional[int] = None  # Deprecated, use source_page
+    section: Optional[str] = None  # Deprecated, use section_number
+    source_page: Optional[int] = None  # Page number (1-based)
+    section_number: Optional[str] = None  # Section identifier
+    source_type: str = "text"  # 'text' or 'image'
     
     def to_dict(self) -> Dict[str, any]:
         """Convert requirement to dictionary for JSON serialization.
@@ -96,8 +102,11 @@ class Requirement:
             "type": self.type.value,
             "priority": self.priority.value,
             "reference": self.reference,
-            "page_number": self.page_number,
-            "section": self.section,
+            "page_number": self.source_page or self.page_number,  # Backward compatibility
+            "section": self.section_number or self.section,  # Backward compatibility
+            "source_page": self.source_page,
+            "section_number": self.section_number,
+            "source_type": self.source_type,
         }
 
 
@@ -161,6 +170,7 @@ class Section:
     page_end: Optional[int]
     raw_text: str
     requirements: List[Requirement] = field(default_factory=list)
+    images: List[Dict] = field(default_factory=list)  # Image metadata for this section
     
     @property
     def page_range(self) -> str:

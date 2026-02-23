@@ -1,7 +1,7 @@
 """Usage tracking decorator and utilities for LLM API calls.
 
 This module provides decorators and utilities for tracking token usage and
-costs across DeepSeek API calls. Maintains session-wide statistics and
+costs across LLM API calls (DeepSeek, OpenRouter, etc.). Maintains session-wide statistics and
 generates detailed cost reports.
 
 Classes:
@@ -9,7 +9,7 @@ Classes:
     UsageReport: Aggregate usage report for a session.
 
 Functions:
-    calculate_deepseek_cost: Calculate cost for given token counts.
+    calculate_cost: Calculate cost for given token counts based on provider/model.
     track_usage: Decorator for tracking API usage.
     get_usage_report: Retrieve current usage report.
     reset_usage_report: Clear usage statistics.
@@ -169,18 +169,21 @@ class UsageReport:
             sections[section]["cost"] += call.total_cost
         return sections
     
-    def format_report(self) -> str:
+    def format_report(self, provider_name: str = "LLM API") -> str:
         """Format usage report as human-readable text.
         
         Generates a formatted text report with overall statistics and
         per-section breakdowns.
+        
+        Args:
+            provider_name: Name of the API provider (e.g., "OpenRouter", "DeepSeek API")
         
         Returns:
             Multi-line string with formatted usage report.
         """
         lines = [
             "=" * 80,
-            "USAGE REPORT - DeepSeek API",
+            f"USAGE REPORT - {provider_name}",
             "=" * 80,
             "",
             f"Total API Calls: {self.calls_count}",
@@ -211,11 +214,30 @@ class UsageReport:
         
         return "\n".join(lines)
     
-    def save_to_file(self, filepath: Path) -> None:
-        """Save report to file."""
+    def save_to_file(self, filepath: Path, provider_name: Optional[str] = None) -> None:
+        """Save report to file.
+        
+        Args:
+            filepath: Path to save the report
+            provider_name: Name of the API provider (e.g., "OpenRouter", "DeepSeek API")
+                          If None, will try to detect from calls
+        """
         filepath.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Auto-detect provider if not specified
+        if provider_name is None:
+            if self.calls:
+                # Get provider from first call
+                provider_name = self.calls[0].provider.title()
+                if provider_name == "Openrouter":
+                    provider_name = "OpenRouter"
+                elif provider_name == "Deepseek":
+                    provider_name = "DeepSeek API"
+            else:
+                provider_name = "LLM API"
+        
         with open(filepath, "w", encoding="utf-8") as f:
-            f.write(self.format_report())
+            f.write(self.format_report(provider_name=provider_name))
         logger.info(f"Usage report saved to {filepath}")
 
 
@@ -234,27 +256,53 @@ def reset_usage_report() -> None:
     _usage_report = UsageReport()
 
 
-def calculate_deepseek_cost(input_tokens: int, output_tokens: int) -> Tuple[float, float]:
-    """Calculate cost for DeepSeek API usage.
+def calculate_cost(
+    input_tokens: int, 
+    output_tokens: int, 
+    provider: str = "deepseek",
+    model_name: Optional[str] = None
+) -> Tuple[float, float]:
+    """Calculate cost for LLM API usage based on provider and model.
     
-    Uses DeepSeek's pricing (as of 2026):
-    - Input tokens (cache miss): $0.28 per 1M tokens
-    - Output tokens: $0.42 per 1M tokens
+    Supports multiple providers:
+    - DeepSeek: Fixed pricing
+    - OpenRouter: Model-specific pricing (from ModelInfo)
     
     Args:
         input_tokens: Number of input (prompt) tokens.
         output_tokens: Number of output (completion) tokens.
+        provider: Provider name ("deepseek" or "openrouter").
+        model_name: Model identifier (required for OpenRouter).
     
     Returns:
         Tuple of (input_cost, output_cost) in USD.
-        
-    Example:
-        >>> input_cost, output_cost = calculate_deepseek_cost(1000, 500)
-        >>> print(f"Total: ${input_cost + output_cost:.6f}")
-        Total: $0.000490
     """
-    INPUT_COST_PER_1M = 0.28
-    OUTPUT_COST_PER_1M = 0.42
+    if provider == "deepseek":
+        # DeepSeek pricing (as of 2026)
+        INPUT_COST_PER_1M = 0.28
+        OUTPUT_COST_PER_1M = 0.42
+    elif provider == "openrouter":
+        # OpenRouter pricing - need to get from model info
+        try:
+            from .openrouter_client import AVAILABLE_MODELS
+            if model_name and model_name in AVAILABLE_MODELS:
+                model_info = AVAILABLE_MODELS[model_name]
+                INPUT_COST_PER_1M = model_info.price_input
+                OUTPUT_COST_PER_1M = model_info.price_output
+            else:
+                # Default to Claude Sonnet pricing if model not found
+                logger.warning(f"Model {model_name} not found, using default pricing")
+                INPUT_COST_PER_1M = 3.0
+                OUTPUT_COST_PER_1M = 15.0
+        except ImportError:
+            logger.warning("Could not import OpenRouter models, using default pricing")
+            INPUT_COST_PER_1M = 3.0
+            OUTPUT_COST_PER_1M = 15.0
+    else:
+        # Unknown provider - use DeepSeek pricing as default
+        logger.warning(f"Unknown provider {provider}, using DeepSeek pricing")
+        INPUT_COST_PER_1M = 0.28
+        OUTPUT_COST_PER_1M = 0.42
     
     input_cost = (input_tokens / 1_000_000) * INPUT_COST_PER_1M
     output_cost = (output_tokens / 1_000_000) * OUTPUT_COST_PER_1M
@@ -262,9 +310,22 @@ def calculate_deepseek_cost(input_tokens: int, output_tokens: int) -> Tuple[floa
     return input_cost, output_cost
 
 
+def calculate_deepseek_cost(input_tokens: int, output_tokens: int) -> Tuple[float, float]:
+    """Calculate cost for DeepSeek API usage (legacy function for backward compatibility).
+    
+    Args:
+        input_tokens: Number of input (prompt) tokens.
+        output_tokens: Number of output (completion) tokens.
+    
+    Returns:
+        Tuple of (input_cost, output_cost) in USD.
+    """
+    return calculate_cost(input_tokens, output_tokens, provider="deepseek")
+
+
 def extract_usage_from_response(response: Dict[str, Any]) -> Optional[tuple[int, int]]:
     """
-    Extract usage information from DeepSeek API response.
+    Extract usage information from API response (supports DeepSeek and OpenRouter formats).
     
     Args:
         response: API response dictionary
@@ -275,6 +336,7 @@ def extract_usage_from_response(response: Dict[str, Any]) -> Optional[tuple[int,
     try:
         if "usage" in response:
             usage = response["usage"]
+            # Both DeepSeek and OpenRouter use prompt_tokens and completion_tokens
             input_tokens = usage.get("prompt_tokens", 0)
             output_tokens = usage.get("completion_tokens", 0)
             return input_tokens, output_tokens
@@ -334,10 +396,12 @@ def track_usage(
                 
                 input_tokens, output_tokens = usage
                 
-                # Calculate costs
-                input_cost, output_cost = calculate_deepseek_cost(
+                # Calculate costs based on provider
+                input_cost, output_cost = calculate_cost(
                     input_tokens, 
-                    output_tokens
+                    output_tokens,
+                    provider=_provider,
+                    model_name=_model_name
                 )
                 
                 # Create usage stats

@@ -82,5 +82,9 @@ docker-compose.override.yml
 
 # Project specific
 project_structure.txt
+*.pdf
+images_tz/
+test_document.pdf
 
-Пример ТТ.pdf
+# Node modules
+node_modules/
