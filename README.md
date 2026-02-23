@@ -5,8 +5,13 @@
 Загрузка PDF -> извлечение требований с помощью AI -> хранение в БД -> review инженером -> контроль исполнения.
 
 <p align="center">
-  <img src="img/input.jpg" width="400" />
-  <img src="img/output.jpg" width="400" />
+  <img src="img/interface_1.png" width="400" />
+  <img src="img/interface_2.png" width="400" />
+</p>
+
+<p align="center">
+  <img src="img/interface_3.png" width="400" />
+  <img src="img/interface_4.png" width="400" />
 </p>
 
 ---
