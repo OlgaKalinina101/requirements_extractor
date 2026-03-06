@@ -25,20 +25,28 @@ class RequirementType(str, Enum):
     Used for filtering and reporting.
     
     Attributes:
-        TECHNICAL: Technical implementation requirements.
-        ORGANIZATIONAL: Process and organizational requirements.
-        DOCUMENTATION: Documentation and reporting requirements.
-        FUNCTIONAL: Functional behavior requirements.
-        NON_FUNCTIONAL: Quality attributes and constraints.
-        OTHER: Requirements that don't fit other categories.
+        SUPPLY: Supply composition, delivery scope, equipment list.
+        TECHNICAL: Technical parameters, characteristics, specifications.
+        FUNCTIONAL: Functional behavior, operations, capabilities.
+        PERFORMANCE: Performance metrics, throughput, response times.
+        SAFETY: Safety requirements, protective measures, risk mitigation.
+        DOCUMENTATION: Documentation, reporting, record-keeping requirements.
+        INTERFACE: Interface specifications, connections, protocols.
+        CONSTRAINT: Constraints, limitations, boundary conditions.
+        PROCESS: Process requirements, workflows, procedures.
+        UNKNOWN: Cannot be confidently classified.
     """
     
-    TECHNICAL = "Техническое"
-    ORGANIZATIONAL = "Организационное"
-    DOCUMENTATION = "Документационное"
-    FUNCTIONAL = "Функциональное"
-    NON_FUNCTIONAL = "Нефункциональное"
-    OTHER = "Прочее"
+    SUPPLY = "Supply"
+    TECHNICAL = "Technical"
+    FUNCTIONAL = "Functional"
+    PERFORMANCE = "Performance"
+    SAFETY = "Safety"
+    DOCUMENTATION = "Documentation"
+    INTERFACE = "Interface"
+    CONSTRAINT = "Constraint"
+    PROCESS = "Process"
+    UNKNOWN = "Unknown"
 
 
 class RequirementPriority(str, Enum):
@@ -51,11 +59,13 @@ class RequirementPriority(str, Enum):
         MANDATORY: Must be implemented (critical requirements).
         RECOMMENDED: Should be implemented (important but not critical).
         OPTIONAL: Nice to have (low priority).
+        UNKNOWN: Cannot be confidently determined.
     """
     
-    MANDATORY = "Обязательно"
-    RECOMMENDED = "Желательно"
-    OPTIONAL = "Опционально"
+    MANDATORY = "Mandatory"
+    RECOMMENDED = "Recommended"
+    OPTIONAL = "Optional"
+    UNKNOWN = "Unknown"
 
 
 @dataclass
@@ -67,7 +77,7 @@ class Requirement:
     
     Attributes:
         id: Unique identifier (e.g., 'REQ-1-001').
-        text: Full requirement text.
+        text: Full requirement text (normalized, close to source).
         type: Classification of requirement type.
         priority: Implementation priority level.
         reference: Optional reference to standards/documents.
@@ -76,6 +86,10 @@ class Requirement:
         source_page: Page number where requirement was found (1-based).
         section_number: Section identifier (e.g., '3.2.1').
         source_type: Source of requirement - 'text' or 'image'.
+        source_quote: Short verbatim quote from source document (NEW).
+        source_fragment: Description of location in section (e.g., 'table', 'list_item') (NEW).
+        confidence: AI confidence score 0.0-1.0 (NEW).
+        extraction_basis: How requirement was extracted (NEW).
     """
     
     id: str
@@ -88,6 +102,14 @@ class Requirement:
     source_page: Optional[int] = None  # Page number (1-based)
     section_number: Optional[str] = None  # Section identifier
     source_type: str = "text"  # 'text' or 'image'
+    
+    # NEW FIELDS for improved extraction quality
+    subitems: List[str] = field(default_factory=list)  # List items if requirement is grouped
+    source_quote: Optional[str] = None  # Verbatim quote from document
+    source_fragment: Optional[str] = None  # Location description (table/list/paragraph)
+    visual_requirement_class: Optional[str] = None  # For images: signal_table|equipment_list|callout_note|layout_constraint
+    confidence: float = 1.0  # AI confidence 0.0-1.0
+    extraction_basis: Optional[str] = None  # explicit|list_item|list_block|table|inferred_from_mandatory_context|image_text
     
     def to_dict(self) -> Dict[str, any]:
         """Convert requirement to dictionary for JSON serialization.
@@ -107,6 +129,12 @@ class Requirement:
             "source_page": self.source_page,
             "section_number": self.section_number,
             "source_type": self.source_type,
+            "subitems": self.subitems,
+            "source_quote": self.source_quote,
+            "source_fragment": self.source_fragment,
+            "visual_requirement_class": self.visual_requirement_class,
+            "confidence": self.confidence,
+            "extraction_basis": self.extraction_basis,
         }
 
 

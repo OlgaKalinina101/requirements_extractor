@@ -105,16 +105,13 @@ const connectWebSocket = () => {
       }
     }
     
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
-    }
+    ws.onerror = () => {}
     
     ws.onclose = () => {
-      // Try to reconnect after 3 seconds
       setTimeout(connectWebSocket, 3000)
     }
-  } catch (error) {
-    console.error('Failed to connect WebSocket:', error)
+  } catch {
+    // WebSocket connection failure is non-critical
   }
 }
 

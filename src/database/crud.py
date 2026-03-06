@@ -4,11 +4,14 @@ This module provides database operations for documents, sections,
 requirements, and coverage metrics.
 """
 
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
+logger = logging.getLogger("api")  # Use api logger so it outputs to console
+
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, func, select
 
 from src.database.models import (
     Project,
@@ -17,7 +20,7 @@ from src.database.models import (
     Requirement,
     CoverageMetrics,
 )
-from src.models import RequirementType, RequirementPriority
+from src.models import RequirementType
 
 
 # ========== Project CRUD ==========
@@ -53,7 +56,48 @@ def get_project_by_code(db: Session, code: str) -> Optional[Project]:
 
 def get_all_projects(db: Session, skip: int = 0, limit: int = 100) -> List[Project]:
     """Get all projects with pagination."""
-    return db.query(Project).order_by(Project.updated_at.desc()).offset(skip).limit(limit).all()
+    return (
+        db.query(Project)
+        .options(joinedload(Project.documents).load_only(Document.id))
+        .order_by(Project.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_project_counts(db: Session, project_ids: List[int]) -> Dict[int, Dict[str, int]]:
+    """Return doc/req counts for a list of project IDs in two queries (no N+1)."""
+    doc_counts = (
+        db.query(Document.project_id, func.count(Document.id).label("doc_count"))
+        .filter(Document.project_id.in_(project_ids))
+        .group_by(Document.project_id)
+        .all()
+    )
+    req_counts = (
+        db.query(Document.project_id, func.count(Requirement.id).label("req_count"))
+        .join(Requirement, Requirement.document_id == Document.id)
+        .filter(Document.project_id.in_(project_ids))
+        .group_by(Document.project_id)
+        .all()
+    )
+    result: Dict[int, Dict[str, int]] = {pid: {"doc_count": 0, "req_count": 0} for pid in project_ids}
+    for pid, count in doc_counts:
+        result[pid]["doc_count"] = count
+    for pid, count in req_counts:
+        result[pid]["req_count"] = count
+    return result
+
+
+def get_document_req_counts(db: Session, document_ids: List[int]) -> Dict[int, int]:
+    """Return requirement counts for a list of document IDs in one query (no N+1)."""
+    rows = (
+        db.query(Requirement.document_id, func.count(Requirement.id).label("req_count"))
+        .filter(Requirement.document_id.in_(document_ids))
+        .group_by(Requirement.document_id)
+        .all()
+    )
+    return {doc_id: count for doc_id, count in rows}
 
 
 def update_project(
@@ -96,71 +140,6 @@ def delete_project(db: Session, project_id: int) -> bool:
 def get_documents_by_project(db: Session, project_id: int) -> List[Document]:
     """Get all documents for a project."""
     return db.query(Document).filter(Document.project_id == project_id).order_by(Document.uploaded_at.desc()).all()
-
-
-def _resolve_requirement_type(value) -> Optional[RequirementType]:
-    """Convert various type representations to RequirementType enum."""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    logger.info(f"[CRUD] _resolve_requirement_type called with: {value!r} (type: {type(value).__name__})")
-    
-    if value is None:
-        return None
-    if isinstance(value, RequirementType):
-        logger.info(f"[CRUD] Already RequirementType enum: {value}")
-        return value
-    if isinstance(value, str):
-        try:
-            result = RequirementType[value]
-            logger.info(f"[CRUD] Converted string '{value}' to enum by name: {result}")
-            return result
-        except KeyError:
-            pass
-        try:
-            result = RequirementType(value)
-            logger.info(f"[CRUD] Converted string '{value}' to enum by value: {result}")
-            return result
-        except ValueError:
-            pass
-        mapping = {
-            "technical": RequirementType.TECHNICAL,
-            "organizational": RequirementType.ORGANIZATIONAL,
-            "documentation": RequirementType.DOCUMENTATION,
-            "functional": RequirementType.FUNCTIONAL,
-            "non_functional": RequirementType.NON_FUNCTIONAL,
-            "nonfunctional": RequirementType.NON_FUNCTIONAL,
-            "other": RequirementType.OTHER,
-        }
-        result = mapping.get(value.lower(), RequirementType.OTHER)
-        logger.info(f"[CRUD] Converted string '{value}' via mapping: {result}")
-        return result
-    logger.warning(f"[CRUD] Could not convert {value!r}, returning OTHER")
-    return RequirementType.OTHER
-
-
-def _resolve_requirement_priority(value) -> Optional[RequirementPriority]:
-    """Convert various priority representations to RequirementPriority enum."""
-    if value is None:
-        return None
-    if isinstance(value, RequirementPriority):
-        return value
-    if isinstance(value, str):
-        try:
-            return RequirementPriority[value]
-        except KeyError:
-            pass
-        try:
-            return RequirementPriority(value)
-        except ValueError:
-            pass
-        mapping = {
-            "mandatory": RequirementPriority.MANDATORY,
-            "recommended": RequirementPriority.RECOMMENDED,
-            "optional": RequirementPriority.OPTIONAL,
-        }
-        return mapping.get(value.lower(), RequirementPriority.MANDATORY)
-    return RequirementPriority.MANDATORY
 
 
 # ========== Document CRUD ==========
@@ -394,7 +373,10 @@ def get_requirements_by_document(
     limit: int = 1000,
 ) -> List[Requirement]:
     """Get all requirements for a document with optional filters.
-    
+
+    Section relationship is eagerly loaded so callers can access
+    req.section.section_number / req.section.title without extra queries.
+
     Args:
         db: Database session
         document_id: Document ID
@@ -402,17 +384,21 @@ def get_requirements_by_document(
         type: Filter by type (optional)
         skip: Number of records to skip
         limit: Maximum number of records to return
-    
+
     Returns:
-        List of Requirement instances
+        List of Requirement instances (with .section pre-loaded)
     """
-    query = db.query(Requirement).filter(Requirement.document_id == document_id)
-    
+    query = (
+        db.query(Requirement)
+        .options(joinedload(Requirement.section))
+        .filter(Requirement.document_id == document_id)
+    )
+
     if status:
         query = query.filter(Requirement.status == status)
     if type:
         query = query.filter(Requirement.type == type)
-    
+
     return query.offset(skip).limit(limit).all()
 
 
@@ -502,65 +488,6 @@ def edit_requirement(
 
 # ========== Coverage Metrics CRUD ==========
 
-def create_or_update_coverage_metrics(
-    db: Session,
-    document_id: int,
-    total_pages: int,
-    processed_pages: int,
-    skipped_pages: Optional[List[int]] = None,
-    requirements_count: int = 0,
-    requirements_by_type: Optional[Dict[str, int]] = None,
-) -> CoverageMetrics:
-    """Create or update coverage metrics for a document.
-    
-    Args:
-        db: Database session
-        document_id: Document ID
-        total_pages: Total pages in document
-        processed_pages: Number of processed pages
-        skipped_pages: List of skipped page numbers (optional)
-        requirements_count: Total number of requirements
-        requirements_by_type: Dictionary with counts by type (optional)
-    
-    Returns:
-        Created or updated CoverageMetrics instance
-    """
-    # Check if metrics already exist
-    existing = db.query(CoverageMetrics).filter(
-        CoverageMetrics.document_id == document_id
-    ).first()
-    
-    coverage_percent = (processed_pages / total_pages * 100) if total_pages > 0 else 0.0
-    
-    if existing:
-        # Update existing
-        existing.total_pages = total_pages
-        existing.processed_pages = processed_pages
-        existing.skipped_pages = skipped_pages
-        existing.coverage_percent = coverage_percent
-        existing.requirements_count = requirements_count
-        existing.requirements_by_type = requirements_by_type
-        existing.calculated_at = datetime.now()
-        db.commit()
-        db.refresh(existing)
-        return existing
-    else:
-        # Create new
-        db_metrics = CoverageMetrics(
-            document_id=document_id,
-            total_pages=total_pages,
-            processed_pages=processed_pages,
-            skipped_pages=skipped_pages,
-            coverage_percent=coverage_percent,
-            requirements_count=requirements_count,
-            requirements_by_type=requirements_by_type,
-        )
-        db.add(db_metrics)
-        db.commit()
-        db.refresh(db_metrics)
-        return db_metrics
-
-
 def get_coverage_metrics(db: Session, document_id: int) -> Optional[CoverageMetrics]:
     """Get coverage metrics for a document.
     
@@ -574,3 +501,101 @@ def get_coverage_metrics(db: Session, document_id: int) -> Optional[CoverageMetr
     return db.query(CoverageMetrics).filter(
         CoverageMetrics.document_id == document_id
     ).first()
+
+
+def create_coverage_metrics(
+    db: Session,
+    document_id: int,
+    total_pages: int,
+    processed_pages: int,
+    skipped_pages: List[int],
+    coverage_percent: float,
+    requirements_count: int
+) -> CoverageMetrics:
+    """Create coverage metrics for a document.
+    
+    Args:
+        db: Database session
+        document_id: Document ID
+        total_pages: Total number of pages in document
+        processed_pages: Number of pages with requirements
+        skipped_pages: List of page numbers that were skipped
+        coverage_percent: Percentage of pages processed (0-100)
+        requirements_count: Total number of requirements extracted
+    
+    Returns:
+        Created CoverageMetrics instance
+    """
+    metrics = CoverageMetrics(
+        document_id=document_id,
+        total_pages=total_pages,
+        processed_pages=processed_pages,
+        skipped_pages=skipped_pages,
+        coverage_percent=coverage_percent,
+        requirements_count=requirements_count,
+        calculated_at=datetime.now(timezone.utc)
+    )
+    db.add(metrics)
+    db.commit()
+    db.refresh(metrics)
+    return metrics
+
+
+def bulk_create_requirements(
+    db: Session,
+    document_id: int,
+    section_id: int,
+    requirements: List[Any]
+) -> int:
+    """Bulk create requirements for a section (OPTIMIZED for speed).
+    
+    Args:
+        db: Database session
+        document_id: Document ID
+        section_id: Section ID
+        requirements: List of Requirement objects from src.models
+    
+    Returns:
+        Number of requirements created
+    """
+    if not requirements:
+        return 0
+    
+    # Prepare bulk insert data
+    requirements_data = []
+    for req in requirements:
+        # Convert enum to string value if needed
+        type_str = None
+        if req.type is not None:
+            if hasattr(req.type, 'value'):
+                type_str = req.type.value
+            else:
+                type_str = str(req.type)
+        
+        priority_str = None
+        if req.priority is not None:
+            if hasattr(req.priority, 'value'):
+                priority_str = req.priority.value
+            else:
+                priority_str = str(req.priority)
+        
+        requirements_data.append({
+            'document_id': document_id,
+            'requirement_id': req.id,
+            'text': req.text,
+            'ai_suggested': req.text,  # Original AI text
+            'section_id': section_id,
+            'type': type_str,
+            'priority': priority_str,
+            'page_number': req.source_page if hasattr(req, 'source_page') else req.page_number,
+            'bbox': None,
+            'subitems': req.subitems if hasattr(req, 'subitems') else None,
+        })
+    
+    logger.debug(f"[CRUD SAVE] Bulk inserting {len(requirements_data)} requirements")
+    # Bulk insert using SQLAlchemy
+    db.bulk_insert_mappings(Requirement, requirements_data)
+    db.commit()
+    
+    return len(requirements_data)
+

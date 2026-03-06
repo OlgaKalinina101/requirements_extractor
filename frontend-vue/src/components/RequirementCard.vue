@@ -19,12 +19,26 @@
     <v-card-text>
       <div class="text-body-1 mb-2">{{ requirement.text }}</div>
       
+      <!-- Subitems list if present -->
+      <v-list v-if="requirement.subitems && requirement.subitems.length > 0" density="compact" class="ml-4 mt-2">
+        <v-list-item
+          v-for="(item, index) in requirement.subitems"
+          :key="index"
+          class="subitem"
+        >
+          <template v-slot:prepend>
+            <v-icon size="small" color="primary">mdi-circle-small</v-icon>
+          </template>
+          <v-list-item-title class="text-body-2">{{ item }}</v-list-item-title>
+        </v-list-item>
+      </v-list>
+      
       <v-chip-group>
         <v-chip size="small" v-if="requirement.type">
-          {{ requirement.type }}
+          {{ translateType(requirement.type) }}
         </v-chip>
         <v-chip size="small" v-if="requirement.priority">
-          {{ requirement.priority }}
+          {{ translatePriority(requirement.priority) }}
         </v-chip>
         <v-chip 
           size="small" 
@@ -52,6 +66,10 @@
               <div class="text-body-2 text-medium-emphasis mt-1">
                 {{ requirement.ai_suggested }}
               </div>
+              <!-- Show subitems if present -->
+              <ul v-if="requirement.subitems && requirement.subitems.length > 0" class="text-body-2 text-medium-emphasis ml-4 mt-1">
+                <li v-for="(item, index) in requirement.subitems" :key="'history-' + index">{{ item }}</li>
+              </ul>
             </div>
             <v-divider class="my-2"></v-divider>
             <div>
@@ -126,6 +144,10 @@
           <div class="text-body-2 text-medium-emphasis mt-1">
             {{ requirement.ai_suggested }}
           </div>
+          <!-- Show subitems if present -->
+          <ul v-if="requirement.subitems && requirement.subitems.length > 0" class="text-body-2 text-medium-emphasis ml-4 mt-1">
+            <li v-for="(item, index) in requirement.subitems" :key="index">{{ item }}</li>
+          </ul>
         </div>
         
         <v-textarea
@@ -153,6 +175,9 @@
 
 <script setup>
 import { ref, watch } from 'vue'
+import { useRequirementTranslations } from '@/composables/useRequirementTranslations'
+
+const { translateType, translatePriority } = useRequirementTranslations()
 
 const props = defineProps({
   requirement: {
@@ -170,7 +195,12 @@ const editedText = ref('')
 const editReason = ref('')
 
 watch(() => props.requirement, (newReq) => {
-  editedText.value = newReq.text
+  // Combine text with subitems for editing
+  if (newReq.subitems && newReq.subitems.length > 0) {
+    editedText.value = newReq.text + '\n' + newReq.subitems.map(item => '- ' + item).join('\n')
+  } else {
+    editedText.value = newReq.text
+  }
 }, { immediate: true })
 
 const getStatusColor = (status) => {
@@ -252,5 +282,13 @@ const handleCardClick = (event) => {
 
 .requirement-card:active {
   transform: translateY(0);
+}
+
+.subitem {
+  background-color: rgba(var(--v-theme-surface-variant), 0.3);
+  border-left: 2px solid rgb(var(--v-theme-primary));
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
 }
 </style>

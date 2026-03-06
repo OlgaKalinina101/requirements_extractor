@@ -115,9 +115,7 @@ const connectWebSocket = () => {
   try {
     ws = new WebSocket(wsUrl)
     
-    ws.onopen = () => {
-      console.log('WebSocket connected')
-    }
+    ws.onopen = () => {}
     
     ws.onmessage = (event) => {
       try {
@@ -128,20 +126,16 @@ const connectWebSocket = () => {
           currentStep.value = data.step || ''
           statusMessage.value = data.message || ''
         }
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e)
+      } catch {
+        // Malformed message; skip
       }
     }
     
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
-    }
+    ws.onerror = () => {}
     
-    ws.onclose = () => {
-      console.log('WebSocket closed')
-    }
-  } catch (error) {
-    console.error('Failed to connect WebSocket:', error)
+    ws.onclose = () => {}
+  } catch {
+    // WebSocket is best-effort; upload proceeds regardless
   }
 }
 
@@ -179,7 +173,6 @@ const handleUpload = async () => {
     emit('results-shown')
     
   } catch (error) {
-    console.error('Upload failed:', error)
     
     // Close WebSocket on error
     if (ws) {

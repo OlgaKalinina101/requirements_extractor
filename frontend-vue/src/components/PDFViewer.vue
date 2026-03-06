@@ -28,8 +28,13 @@
         </div>
 
         <!-- PDF Canvas Container -->
-        <div ref="canvasContainer" class="canvas-container">
+        <div v-if="!isImageDocument" ref="canvasContainer" class="canvas-container">
           <canvas ref="pdfCanvas" class="pdf-canvas"></canvas>
+        </div>
+
+        <!-- Image Container -->
+        <div v-else class="image-container">
+          <img :src="pdfUrl" class="document-image" alt="Document" />
         </div>
       </div>
 
@@ -110,6 +115,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
+import { exportUrls } from '@/services/api'
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
@@ -144,6 +150,7 @@ const totalPages = ref(props.totalPagesCount || 0)
 const loading = ref(true)
 const error = ref(null)
 const scale = ref(1.0)
+const isImageDocument = ref(false)
 
 // PDF.js objects
 let pdfDocument = null
@@ -151,29 +158,41 @@ let currentPageObj = null
 
 const pdfUrl = computed(() => {
   if (!props.documentId) return ''
-  return `/api/documents/${props.documentId}/pdf`
+  return exportUrls.pdf(props.documentId)
 })
 
-// Load PDF document
+// Load PDF document or image
 const loadPDF = async () => {
   try {
     loading.value = true
     error.value = null
     
-    console.log('🔍 Loading PDF from:', pdfUrl.value)
+    // Try to detect if this is an image by fetching headers
+    try {
+      const response = await fetch(pdfUrl.value, { method: 'HEAD' })
+      const contentType = response.headers.get('content-type')
+      
+      if (contentType && contentType.startsWith('image/')) {
+        isImageDocument.value = true
+        totalPages.value = 1
+        loading.value = false
+        emit('loaded')
+        return
+      }
+    } catch {
+      // Content-type check is best-effort; proceed with PDF loading
+    }
     
     const loadingTask = pdfjsLib.getDocument(pdfUrl.value)
     pdfDocument = await loadingTask.promise
     
     totalPages.value = pdfDocument.numPages
-    console.log(`✅ PDF loaded: ${totalPages.value} pages`)
     
     await renderPage(currentPage.value)
     
     loading.value = false
     emit('loaded')
   } catch (err) {
-    console.error('❌ PDF loading error:', err)
     error.value = `Не удалось загрузить PDF: ${err.message}`
     loading.value = false
   }
@@ -184,30 +203,17 @@ const renderPage = async (pageNum) => {
   if (!pdfDocument || !pdfCanvas.value) return
   
   try {
-    console.log(`📄 Rendering page ${pageNum}`)
-    
-    // Get page
     currentPageObj = await pdfDocument.getPage(pageNum)
     
-    // Calculate viewport
     const viewport = currentPageObj.getViewport({ scale: scale.value })
     
-    // Set canvas dimensions
     const canvas = pdfCanvas.value
     const context = canvas.getContext('2d')
     canvas.height = viewport.height
     canvas.width = viewport.width
     
-    // Render page
-    const renderContext = {
-      canvasContext: context,
-      viewport: viewport
-    }
-    
-    await currentPageObj.render(renderContext).promise
-    console.log(`✅ Page ${pageNum} rendered`)
+    await currentPageObj.render({ canvasContext: context, viewport }).promise
   } catch (err) {
-    console.error(`❌ Error rendering page ${pageNum}:`, err)
     error.value = `Ошибка рендеринга страницы ${pageNum}`
   }
 }
@@ -270,7 +276,6 @@ watch(() => props.initialPage, async (newPage) => {
 })
 
 onMounted(() => {
-  console.log('🚀 PDFViewer mounted with PDF.js')
   loadPDF()
 })
 
@@ -300,6 +305,23 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 20px;
+}
+
+.image-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: auto;
+}
+
+.document-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .pdf-canvas {

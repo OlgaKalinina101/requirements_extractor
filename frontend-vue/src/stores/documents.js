@@ -18,7 +18,6 @@ export const useDocumentsStore = defineStore('documents', {
         this.documents = response.data.documents || []
       } catch (error) {
         this.error = error.message
-        console.error('Failed to fetch documents:', error)
       } finally {
         this.loading = false
       }
@@ -33,7 +32,6 @@ export const useDocumentsStore = defineStore('documents', {
         return response.data
       } catch (error) {
         this.error = error.message
-        console.error('Failed to fetch document:', error)
         throw error
       } finally {
         this.loading = false
@@ -49,7 +47,6 @@ export const useDocumentsStore = defineStore('documents', {
         return response.data
       } catch (error) {
         this.error = error.message
-        console.error('Failed to upload document:', error)
         throw error
       } finally {
         this.loading = false

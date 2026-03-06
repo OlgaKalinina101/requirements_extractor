@@ -16,26 +16,35 @@ Features:
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import os
+import sys
+import tempfile
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 # Third-party imports
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Query, Depends
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 # Local imports
-from src.config import ApplicationConfig, load_from_env
-from src.requirements_extractor import RequirementsExtractor, create_extractor
 from src.logger import setup_logger
-from src.models import TableOfContentsEntry, RequirementType, RequirementPriority
-from src.usage_tracker import get_usage_report, reset_usage_report
-from src.database.database import get_db, init_db
+from src.models import RequirementType
+from src.database.database import get_db, init_db, SessionLocal
 from src.database import crud
-from src.database.models import Document, Requirement, Section, CoverageMetrics
+
+
+@contextmanager
+def db_session() -> Generator:
+    """Context manager that opens and properly closes a DB session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # Setup logging
 setup_logger(name="api", log_file=Path("logs/api.log"), level="INFO")
@@ -46,11 +55,25 @@ setup_logger(name="src.openrouter_client", log_file=Path("logs/openrouter.log"),
 setup_logger(name="src.requirements_extractor", log_file=Path("logs/extractor.log"), level="INFO")
 setup_logger(name="src.pdf_processor", log_file=Path("logs/pdf.log"), level="INFO")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan handler — runs startup and shutdown logic."""
+    try:
+        init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        logger.warning("Continuing without database - some features may not work")
+    logger.info("WebSocket logging system initialized - handlers will be attached per extraction session")
+    yield
+
+
 # Create FastAPI app
 app = FastAPI(
     title="PDF Requirements Extractor API - OpenRouter",
     description="Extract requirements from technical specifications using OpenRouter AI models (Claude, GPT, Gemini, Qwen)",
-    version="3.0.0"
+    version="3.0.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware for frontend
@@ -61,17 +84,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize database on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on application startup."""
-    try:
-        init_db()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        logger.warning("Continuing without database - some features may not work")
 
 # WebSocket connections manager
 class ConnectionManager:
@@ -133,8 +145,9 @@ class ConnectionManager:
                 self.active_connections.remove(conn)
                 logger.info(f"Removed disconnected WebSocket. Remaining: {len(self.active_connections)}")
 
-manager = ConnectionManager()
 
+# Initialize manager AFTER class definition
+manager = ConnectionManager()
 
 # Custom logging handler to send logs via WebSocket
 class WebSocketHandler(logging.Handler):
@@ -183,7 +196,7 @@ class WebSocketHandler(logging.Handler):
             )
         except Exception as e:
             # Don't let logging errors break the app
-            print(f"WebSocket logging error: {e}")
+            sys.stderr.write(f"WebSocket logging error: {e}\n")
 
 
 # Pydantic models for API responses
@@ -264,7 +277,7 @@ async def root() -> Dict[str, str]:
     """
     return {
         "name": "PDF Requirements Extractor API",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "status": "running"
     }
 
@@ -312,7 +325,7 @@ async def websocket_logs(websocket: WebSocket) -> None:
         manager.disconnect(websocket)
 
 
-async def send_progress(step: str, progress: int, message: str) -> None:
+async def send_progress(step: str, progress: int, message: str, section_id: Optional[int] = None, **kwargs) -> None:
     """Send progress update to all connected WebSocket clients.
     
     Broadcasts progress information to connected clients and logs to console
@@ -322,6 +335,8 @@ async def send_progress(step: str, progress: int, message: str) -> None:
         step: Name of the current processing step (e.g., 'upload', 'pdf', 'extract').
         progress: Progress percentage (0-100).
         message: Human-readable progress message.
+        section_id: Optional section identifier for parallel processing context.
+        **kwargs: Additional metadata to include in the progress message.
     """
     progress_msg = {
         "type": "progress",
@@ -331,16 +346,50 @@ async def send_progress(step: str, progress: int, message: str) -> None:
         "timestamp": datetime.now().isoformat()
     }
     
-    # Debug logging
-    print(f"[PROGRESS] Sending: {progress}% - {message}")  # Console output
-    logger.info(f"[PROGRESS] {progress}% - {message}")  # File log
+    # Add section context if provided
+    if section_id is not None:
+        progress_msg["section_id"] = section_id
+    
+    # Add any additional metadata
+    progress_msg.update(kwargs)
+    
+    # Log to file only (removed print() duplication)
+    logger.info(f"[PROGRESS] {progress}% - {message}" + (f" (section {section_id})" if section_id else ""))
     
     # Send to WebSocket
     if len(manager.active_connections) > 0:
         await manager.send_message(progress_msg)
-        print(f"[PROGRESS] Sent to {len(manager.active_connections)} client(s)")
     else:
-        print("[PROGRESS] WARNING: No active WebSocket connections!")
+        logger.warning("[PROGRESS] No active WebSocket connections!")
+
+
+async def send_metric(metric_name: str, value: Any, section: Optional[str] = None, **kwargs) -> None:
+    """Send structured metric to all connected WebSocket clients.
+    
+    Broadcasts structured metric data for real-time monitoring and analytics.
+    
+    Args:
+        metric_name: Name of the metric (e.g., 'requirements_extracted', 'ai_call_complete').
+        value: Metric value (number, string, etc.).
+        section: Optional section identifier.
+        **kwargs: Additional metric metadata (e.g., tokens, cost, duration).
+    """
+    metric_msg = {
+        "type": "metric",
+        "metric_name": metric_name,
+        "value": value,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    if section is not None:
+        metric_msg["section"] = section
+    
+    metric_msg.update(kwargs)
+    
+    logger.debug(f"[METRIC] {metric_name}={value}" + (f" section={section}" if section else ""))
+    
+    if len(manager.active_connections) > 0:
+        await manager.send_message(metric_msg)
 
 
 @app.post("/api/extract", response_model=ExtractionResult)
@@ -350,827 +399,57 @@ async def extract_requirements(
     model: str = Form("claude-sonnet-4.5", description="AI model identifier"),
     project_id: Optional[str] = Form(None, description="Project ID to associate document with"),
 ) -> ExtractionResult:
-    """Extract requirements from uploaded PDF file using OpenRouter AI models.
-    
-    This endpoint:
-    1. Validates and saves the uploaded PDF
-    2. Extracts text and images from all pages
-    3. Parses table of contents (or creates automatic sections)
-    4. Extracts requirements from text using selected AI model
-    5. Extracts requirements from images using multimodal AI
-    6. Generates JSON registry and optional Word document
-    7. Calculates token usage and costs
-    
+    """Extract requirements from uploaded PDF using OpenRouter AI models.
+
+    Delegates to ExtractionService which encapsulates the full pipeline.
     Progress updates are sent via WebSocket in real-time.
-    
-    Args:
-        file: PDF file to process (technical specification document).
-        generate_word: Whether to generate Word document with results.
-        model: AI model to use (default: claude-sonnet-4.5)
-    
-    Returns:
-        ExtractionResult containing success status, statistics, and file paths.
-        
-    Raises:
-        HTTPException: If file is invalid, processing fails, or API errors occur.
     """
-    start_time = datetime.now()
-    output_dir = None  # Initialize for cleanup in finally block
-    
+    from src.extraction_service import ExtractionService
+
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+
+    logger.info(f"[UPLOAD] Starting upload: {file.filename}")
+
+    current_loop = asyncio.get_running_loop()
+
+    # Setup WebSocket logging for this extraction session
+    ws_handler = WebSocketHandler(manager, current_loop)
+    ws_handler.setLevel(logging.INFO)
+    ws_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+    for log_name in ("api", "src.openrouter_client", "src.requirements_extractor", "src.pdf_processor"):
+        logging.getLogger(log_name).addHandler(ws_handler)
+
     try:
-        # Validate file
-        if not file.filename.endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF files are supported")
-        
-        await send_progress("upload", 5, f"Uploading file: {file.filename}")
-        logger.info(f"[UPLOAD] Starting upload: {file.filename}")
-        
-        # Save uploaded file
-        upload_dir = Path("data/uploads")
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        pdf_filename = f"{timestamp}_{file.filename}"
-        pdf_path = upload_dir / pdf_filename
-        
         content = await file.read()
-        with open(pdf_path, "wb") as f:
-            f.write(content)
-        
-        logger.info(f"File uploaded: {pdf_path}")
-        logger.info(f"Current working directory: {Path.cwd()}")
-        
-        # Save document to database
-        db_document = None
-        try:
-            print("[DB] Attempting to connect to database...")
-            db = next(get_db())
-            print("[DB] Database connection successful")
-            db_document = crud.create_document(
-                db=db,
-                filename=file.filename,
-                file_path=str(pdf_path),
-                total_pages=None,
-                project_id=int(project_id) if project_id else None,
-                model_used=model,
-            )
-            print(f"[DB] Document saved to database with ID: {db_document.id}")
-            await send_progress("upload", 10, f"File uploaded successfully (Document ID: {db_document.id})")
-        except Exception as db_error:
-            print(f"[DB] FAILED to save document: {db_error}")
-            import traceback
-            traceback.print_exc()
-            logger.error(f"[DB] Failed to save document to database: {db_error}", exc_info=True)
-            logger.warning("[DB] Continuing without database - data will only be saved to files")
-            await send_progress("upload", 10, "File uploaded successfully")
-        
-        # Create temporary directory for this session
-        import tempfile
-        temp_session_dir = tempfile.mkdtemp(prefix=f"req_extract_{timestamp}_")
-        output_dir = Path(temp_session_dir)
-        
-        logger.info(f"[TEMP] Using temporary directory: {output_dir}")
-        
-        # Reset usage tracking
-        reset_usage_report()
-        
-        # Get current event loop for thread-safe WebSocket communication
-        current_loop = asyncio.get_running_loop()
-        
-        # Setup WebSocket logging for this extraction
-        ws_handler = WebSocketHandler(manager, current_loop)
-        ws_handler.setLevel(logging.INFO)
-        ws_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-        
-        # Add handler to relevant loggers
-        api_logger = logging.getLogger("api")
-        api_logger.addHandler(ws_handler)
-        
-        openrouter_logger = logging.getLogger("src.openrouter_client")
-        openrouter_logger.addHandler(ws_handler)
-        
-        extractor_logger = logging.getLogger("src.requirements_extractor")
-        extractor_logger.addHandler(ws_handler)
-        
-        pdf_logger = logging.getLogger("src.pdf_processor")
-        pdf_logger.addHandler(ws_handler)
-        
-        await send_progress("init", 15, "Initializing extractor")
-        logger.info(f"[INIT] Creating configuration and extractor with model: {model}")
-        await asyncio.sleep(0.3)
-        
-        # Load configuration from environment
-        config = load_from_env()
-        config.pdf_path = pdf_path
-        config.output_dir = output_dir
-        config.image_dir = output_dir / "images"
-        config.provider = "openrouter"  # Use OpenRouter by default
-        
-        # Ensure image directory exists BEFORE creating extractor
-        # (ApplicationConfig.__post_init__ only creates the default data/images path)
-        config.image_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"[INIT] Image directory: {config.image_dir}")
-        
-        # Create extractor with selected model
-        # PDF processor is initialized automatically in RequirementsExtractor.__init__
-        try:
-            extractor = create_extractor(config, model_id=model)
-        except ValueError as e:
-            # Handle invalid model error
-            error_msg = str(e)
-            logger.error(f"[INIT] Invalid model '{model}': {error_msg}")
-            await send_progress("error", 0, f"Ошибка: Неверная модель '{model}'")
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid model '{model}'. Available models: claude-sonnet-4.5, claude-opus-4.6, gpt-4.1, qwen-3.5-plus, gemini-3.1-pro"
-            )
-        
-        # Verify model was set correctly
-        actual_model = extractor.ai_client.selected_model if extractor.ai_client else None
-        logger.info(f"[INIT] Requested model: {model}, Actual model in client: {actual_model} via {config.provider}")
-        
-        # Step 1: Extract PDF pages with progress callback
-        logger.info(f"[PDF] Starting PDF extraction for {pdf_path}")
-        await send_progress("pdf", 20, "📄 Starting PDF extraction...")
-        await asyncio.sleep(0.3)
-        
-        # Get the event loop for thread-safe calls
-        main_loop = asyncio.get_running_loop()
-        
-        # Track pages processed
-        pages_processed = [0]
-        total_pages_ref = [0]
-        last_update = [0]  # Track last update to avoid too many messages
-        
-        def sync_progress(current: int, total: int):
-            """Sync wrapper for progress callback - thread-safe."""
-            pages_processed[0] = current
-            total_pages_ref[0] = total
-            percentage = 20 + int((current / total) * 10)  # 20-30%
-            
-            # Log progress (every 10 pages)
-            if current % 10 == 0 or current == 1 or current == total:
-                logger.info(f"[PDF] Extraction progress: {current}/{total} pages")
-            
-            # Send to WebSocket (every 5 pages to avoid spam)
-            if current - last_update[0] >= 5 or current == 1 or current == total:
-                last_update[0] = current
-                # Use run_coroutine_threadsafe for thread-safe async call
-                asyncio.run_coroutine_threadsafe(
-                    send_progress(
-                        "pdf", 
-                        percentage, 
-                        f"📄 Extracting pages: {current}/{total}"
-                    ),
-                    main_loop
-                )
-        
-        # Extract pages with progress - run in executor to not block
-        from concurrent.futures import ThreadPoolExecutor
-        
-        loop = asyncio.get_event_loop()
-        
-        def extract_pdf_sync():
-            logger.info("[PDF] Starting pymupdf extraction")
-            pages, image_metadata = extractor.pdf_processor.extract_pages(
-                pdf_path,
-                config.image_dir,
-                progress_callback=sync_progress
-            )
-            return pages, image_metadata
-        
-        # Run in executor to allow async operations to continue
-        logger.info("[PDF] Running extraction in thread pool")
-        with ThreadPoolExecutor() as executor:
-            extractor.pages, extractor.page_image_metadata = await loop.run_in_executor(executor, extract_pdf_sync)
-        
-        total_images = sum(len(imgs) for imgs in extractor.page_image_metadata.values())
-        logger.info(f"[PDF] Extraction complete: {len(extractor.pages)} pages, {total_images} images")
-        if total_images > 0:
-            logger.info(f"[PDF] Images found on pages: {sorted(extractor.page_image_metadata.keys())}")
-            for page_num, imgs in extractor.page_image_metadata.items():
-                logger.debug(f"[PDF] Page {page_num}: {len(imgs)} images - {[img['filename'] for img in imgs]}")
-        else:
-            logger.warning("[PDF] No images found in PDF!")
-        await send_progress("pdf", 30, f"✅ Extracted {len(extractor.pages)} pages successfully")
-        await asyncio.sleep(0.5)
-        
-        # Update document status to processing
-        if db_document:
-            try:
-                db = next(get_db())
-                crud.update_document_status(
-                    db=db,
-                    document_id=db_document.id,
-                    status="processing",
-                    total_pages=len(extractor.pages),
-                )
-                logger.info(f"[DB] Document {db_document.id} status updated to 'processing'")
-            except Exception as db_error:
-                logger.warning(f"[DB] Failed to update document status: {db_error}")
-        
-        # Step 2: Parse TOC from first pages or use AI
-        logger.info("[TOC] Starting table of contents analysis")
-        await send_progress("toc", 35, "📚 Analyzing document structure...")
-        await asyncio.sleep(0.3)
-        
-        # Try to extract TOC from PDF (use first 10 pages for analysis)
-        toc_text = "\n\n".join(extractor.pages[:min(10, len(extractor.pages))])
-        
-        logger.info(f"Attempting to parse TOC from first {min(10, len(extractor.pages))} pages")
-        
-        try:
-            # Use AI client to parse TOC
-            if extractor.ai_client:
-                toc_entries_data = extractor.ai_client.parse_table_of_contents(toc_text)
-                logger.info(f"[TOC] AI returned {len(toc_entries_data)} TOC entries")
-                toc_entries = []
-                skipped_count = 0
-                for entry in toc_entries_data:
-                    # Validate and set default for page_start
-                    page_start = entry.get("page_start")
-                    if page_start is None or not isinstance(page_start, int):
-                        logger.warning(f"[TOC] Invalid page_start for entry {entry.get('number', 'unknown')}: {entry.get('title', 'unknown')}, skipping")
-                        skipped_count += 1
-                        continue
-                    
-                    toc_entries.append(
-                        TableOfContentsEntry(
-                            level=entry.get("level", 1),
-                            number=entry.get("number", ""),
-                            title=entry.get("title", ""),
-                            page_start=page_start
-                        )
-                    )
-                    logger.debug(f"[TOC] Added entry: {entry.get('number')} - {entry.get('title')} (page {page_start})")
-                
-                logger.info(f"[TOC] Successfully parsed {len(toc_entries)} TOC entries from PDF (skipped {skipped_count} invalid entries)")
-                if len(toc_entries) > 0:
-                    extractor.toc_entries = toc_entries
-                    logger.info(f"[TOC] Sections: {[f'{e.number} - {e.title} (p.{e.page_start})' for e in toc_entries]}")
-                    await send_progress("toc", 40, f"✅ Found {len(toc_entries)} sections in document")
-                    await asyncio.sleep(0.3)
-                else:
-                    # AI returned 0 valid sections — fall back to automatic
-                    raise RuntimeError(
-                        f"TOC parsing returned 0 valid sections (AI data: {len(toc_entries_data)} raw, "
-                        f"{skipped_count} skipped). Falling back to automatic sections."
-                    )
-            else:
-                raise RuntimeError("AI client not available for TOC parsing")
-                
-        except Exception as e:
-            logger.warning(f"Failed to parse TOC automatically: {e}")
-            logger.info("Creating automatic sections based on pages")
-            
-            # Fallback: create sections for every ~20 pages
-            manual_toc = []
-            total_pages = len(extractor.pages)
-            sections_per_doc = max(1, total_pages // 20)  # ~20 pages per section
-            
-            for i in range(0, total_pages, sections_per_doc):
-                section_num = len(manual_toc) + 1
-                manual_toc.append({
-                    "level": 1,
-                    "number": str(section_num),
-                    "title": f"Раздел {section_num} (стр. {i+1}-{min(i+sections_per_doc, total_pages)})",
-                    "page_start": i + 1,
-                    "children": []
-                })
-            
-            extractor.parse_table_of_contents(manual_toc=manual_toc)
-            logger.info(f"Created {len(manual_toc)} automatic sections")
-            await send_progress("toc", 40, f"✅ Created {len(manual_toc)} sections automatically")
-            await asyncio.sleep(0.3)
-        
-        # Step 3: Extract requirements with detailed progress
-        logger.info("[EXTRACT] Starting requirements extraction")
-        # Get actual model name from extractor
-        if extractor.ai_client and hasattr(extractor.ai_client, 'selected_model'):
-            from src.openrouter_client import AVAILABLE_MODELS
-            actual_model = extractor.ai_client.selected_model
-            if actual_model in AVAILABLE_MODELS:
-                model_display_name = AVAILABLE_MODELS[actual_model].name
-            else:
-                model_display_name = actual_model
-        else:
-            model_display_name = model
-        await send_progress("extract", 45, f"🤖 Starting requirements extraction with {model_display_name}...")
-        await asyncio.sleep(0.5)
-        
-        total_sections = len(extractor.toc_entries)
-        logger.info(f"[EXTRACT] Total sections to process: {total_sections}")
-        
-        # Manual extraction with progress updates using AI client
-        if not extractor.ai_client:
-            raise RuntimeError("AI client not configured")
-        
-        for idx, toc_entry in enumerate(extractor.toc_entries):
-            section_num = idx + 1
-            base_progress = 45 + int((idx / total_sections) * 40)
-            
-            logger.info(f"[EXTRACT] Processing section {section_num}/{total_sections}: {toc_entry.number} {toc_entry.title}")
-            
-            await send_progress(
-                "extract", 
-                base_progress, 
-                f"📝 Section {section_num}/{total_sections}: {toc_entry.number} {toc_entry.title}"
-            )
-            await asyncio.sleep(0.3)
-            
-            # Find end page
-            end_page = None
-            # Ensure toc_entry.page_start is valid
-            if toc_entry.page_start is None or not isinstance(toc_entry.page_start, int):
-                logger.error(f"Invalid page_start for TOC entry: {toc_entry.number} - {toc_entry.title}")
-                continue
-            
-            for next_entry in extractor.toc_entries[idx+1:]:
-                # Skip entries with invalid page_start
-                if next_entry.page_start is None or not isinstance(next_entry.page_start, int):
-                    continue
-                if next_entry.page_start > toc_entry.page_start:
-                    end_page = next_entry.page_start
-                    break
-            
-            # Validate end_page before use
-            if end_page is not None and not isinstance(end_page, int):
-                logger.warning(f"Invalid end_page type: {type(end_page)}, setting to None")
-                end_page = None
-            
-            # Get section text
-            section_text = extractor.pdf_processor.get_section_text(
-                extractor.pages,
-                toc_entry.page_start,
-                end_page
-            )
-            
-            await send_progress(
-                "extract",
-                base_progress + 1,
-                f"⚡ Sending section {section_num}/{total_sections} to AI API..."
-            )
-            await asyncio.sleep(0.3)
-            
-            logger.info(f"[EXTRACT] Calling AI API for section {section_num}/{total_sections}")
-            
-            # Extract requirements from text
-            # Safe calculation: only subtract if end_page is a valid integer
-            page_range = f"{toc_entry.page_start}-{end_page - 1 if (end_page is not None and isinstance(end_page, int)) else 'end'}"
-            requirements = extractor.ai_client.extract_requirements(
-                section_number=toc_entry.number,
-                section_title=toc_entry.title,
-                page_range=page_range,
-                section_text=section_text
-            )
-            
-            # Assign accurate page numbers using text search
-            from src.page_finder import assign_page_numbers_to_requirements
-            assign_page_numbers_to_requirements(
-                requirements=requirements,
-                pages=extractor.pages,
-                page_start=toc_entry.page_start,
-                page_end=end_page,
-                fallback_page=toc_entry.page_start
-            )
-            
-            # Set section and source type
-            for req in requirements:
-                req.section_number = toc_entry.number
-                req.source_type = "text"
-            
-            # Extract requirements from images in this section (ONCE per section, not per requirement!)
-            image_requirements = []
-            if hasattr(extractor, 'page_image_metadata') and extractor.page_image_metadata:
-                # Check if we have images for pages in this section
-                # Safe range: only use end_page if it's a valid integer
-                range_end = end_page if (end_page is not None and isinstance(end_page, int)) else len(extractor.pages) + 1
-                section_pages = list(range(toc_entry.page_start, range_end))
-                logger.debug(f"[EXTRACT] Section {section_num}: checking pages {section_pages} for images")
-                logger.debug(f"[EXTRACT] Available image pages: {sorted(extractor.page_image_metadata.keys())}")
-                section_images = []
-                for page_num in section_pages:
-                    if page_num in extractor.page_image_metadata:
-                        imgs = extractor.page_image_metadata[page_num]
-                        logger.debug(f"[EXTRACT] Found {len(imgs)} images on page {page_num}")
-                        section_images.extend(imgs)
-                    else:
-                        logger.debug(f"[EXTRACT] No images on page {page_num}")
-                
-                if section_images:
-                    logger.info(f"[EXTRACT] Found {len(section_images)} images in section {section_num}/{total_sections}")
-                    await send_progress(
-                        "extract",
-                        base_progress + 1,
-                        f"🖼️ Processing {len(section_images)} images in section {section_num}/{total_sections}..."
-                    )
-                    
-                    # Use OpenRouter client if available for image extraction
-                    if hasattr(extractor, 'ai_client') and extractor.ai_client:
-                        if hasattr(extractor.ai_client, 'extract_requirements_from_image'):
-                            logger.info(f"[EXTRACT] Processing {len(section_images)} images separately from text")
-                            for idx, img_meta in enumerate(section_images, 1):
-                                image_path = Path(img_meta["path"])
-                                logger.info(f"[EXTRACT] Image {idx}/{len(section_images)}: {image_path.name} (page {img_meta['page_number']}, section {toc_entry.number})")
-                                
-                                if image_path.exists():
-                                    logger.debug(f"[EXTRACT] Image file exists: {image_path.absolute()}")
-                                    logger.debug(f"[EXTRACT] Image metadata: {img_meta}")
-                                    
-                                    # Extract requirements from this image separately
-                                    img_reqs = extractor.ai_client.extract_requirements_from_image(
-                                        image_path=image_path,
-                                        page_number=img_meta["page_number"],
-                                        section_number=toc_entry.number,
-                                        section_title=toc_entry.title
-                                    )
-                                    
-                                    logger.info(f"[EXTRACT] Image {idx}/{len(section_images)}: Got {len(img_reqs)} requirements from AI")
-                                    if img_reqs:
-                                        logger.debug(f"[EXTRACT] Image requirements IDs: {[req.id for req in img_reqs]}")
-                                    else:
-                                        logger.warning(f"[EXTRACT] Image {idx}/{len(section_images)}: No requirements returned from AI for {image_path.name}")
-                                    
-                                    image_requirements.extend(img_reqs)
-                                else:
-                                    logger.warning(f"[EXTRACT] Image file not found: {image_path.absolute()}")
-                        else:
-                            logger.warning("[EXTRACT] Image extraction skipped - client doesn't support images (no extract_requirements_from_image method)")
-                    else:
-                        logger.warning("[EXTRACT] Image extraction skipped - AI client not available")
-                else:
-                    logger.debug(f"[EXTRACT] No images found for section {section_num} (pages {toc_entry.page_start}-{range_end-1})")
-            else:
-                logger.debug(f"[EXTRACT] No page_image_metadata available for section {section_num}")
-            
-            # Combine text and image requirements
-            all_requirements = requirements + image_requirements
-            
-            # Create section and add to registry
-            from src.models import Section
-            # Safe calculation: only subtract if end_page is a valid integer
-            page_end_value = None
-            if end_page is not None and isinstance(end_page, int):
-                page_end_value = end_page - 1
-            
-            section = Section(
-                number=toc_entry.number,
-                title=toc_entry.title,
-                page_start=toc_entry.page_start,
-                page_end=page_end_value,
-                raw_text=section_text,
-                requirements=all_requirements
-            )
-            
-            # Add image metadata to section
-            if hasattr(extractor, 'page_image_metadata'):
-                # Safe range: only use end_page if it's a valid integer
-                range_end = end_page if (end_page is not None and isinstance(end_page, int)) else len(extractor.pages) + 1
-                for page_num in range(toc_entry.page_start, range_end):
-                    if page_num in extractor.page_image_metadata:
-                        section.images.extend(extractor.page_image_metadata[page_num])
-            
-            extractor.registry.add_section(section)
-            
-            # Save section and requirements to database
-            if db_document:
-                try:
-                    db = next(get_db())
-                    # Create section in database
-                    db_section = crud.create_section(
-                        db=db,
-                        document_id=db_document.id,
-                        section_number=toc_entry.number,
-                        title=toc_entry.title,
-                        page_start=toc_entry.page_start,
-                        page_end=page_end_value,
-                    )
-                    
-                    # Save all requirements to database
-                    for req in all_requirements:
-                        crud.create_requirement(
-                            db=db,
-                            document_id=db_document.id,
-                            requirement_id=req.id,
-                            text=req.text,
-                            ai_suggested=req.text,  # Original AI text
-                            section_id=db_section.id,
-                            type=req.type,
-                            priority=req.priority,
-                            page_number=req.source_page or req.page_number,
-                            bbox=None,  # Can be added later if needed
-                        )
-                    
-                    logger.debug(f"[DB] Saved section {section_num} with {len(all_requirements)} requirements to database")
-                except Exception as db_error:
-                    print(f"[DB] FAILED to save section {section_num}: {db_error}")
-                    logger.warning(f"[DB] Failed to save section {section_num} to database: {db_error}")
-            
-            req_count_text = len(requirements)
-            req_count_image = len(image_requirements)
-            req_count_total = len(all_requirements)
-            
-            await send_progress(
-                "extract",
-                base_progress + 2,
-                f"✅ Section {section_num}/{total_sections}: {req_count_text} text + {req_count_image} image = {req_count_total} requirements"
-            )
-            await asyncio.sleep(0.3)
-            
-            logger.info(f"[EXTRACT] Section {section_num}/{total_sections} complete: {req_count_text} text + {req_count_image} image = {req_count_total} requirements")
-        
-        logger.info(f"[EXTRACT] All sections complete! Total requirements: {extractor.registry.total_requirements}")
-        await send_progress("extract", 85, f"🎉 Requirements extraction complete! Total: {extractor.registry.total_requirements}")
-        await asyncio.sleep(0.5)
-        
-        # Update document status and save coverage metrics to database
-        if db_document:
-            try:
-                db = next(get_db())
-                # Update document status and total pages
-                crud.update_document_status(
-                    db=db,
-                    document_id=db_document.id,
-                    status="processing",  # Will be updated to "completed" later
-                    total_pages=len(extractor.pages),
-                )
-                
-                # Calculate and save coverage metrics
-                # Find which pages actually have requirements
-                pages_with_requirements = set()
-                for section in extractor.registry.sections:
-                    for req in section.requirements:
-                        # Use page_number if available, fallback to source_page
-                        page = req.page_number or req.source_page
-                        if page:
-                            pages_with_requirements.add(page)
-                
-                logger.info(f"[METRICS DEBUG] Total requirements: {extractor.registry.total_requirements}")
-                logger.info(f"[METRICS DEBUG] Sections: {len(extractor.registry.sections)}")
-                for i, section in enumerate(extractor.registry.sections[:3]):  # Log first 3 sections
-                    logger.info(f"[METRICS DEBUG] Section {i+1}: {len(section.requirements)} requirements")
-                    for j, req in enumerate(section.requirements[:3]):  # Log first 3 reqs per section
-                        logger.info(f"[METRICS DEBUG]   Req {j+1}: page_number={req.page_number}, source_page={req.source_page}")
-                
-                # Calculate skipped pages (pages without any requirements)
-                all_pages = set(range(1, len(extractor.pages) + 1))
-                skipped_pages = sorted(list(all_pages - pages_with_requirements))
-                processed_pages = len(pages_with_requirements)
-                
-                logger.info(f"[METRICS] Total pages: {len(extractor.pages)}, "
-                           f"Processed: {processed_pages}, "
-                           f"Skipped: {len(skipped_pages)} pages: {skipped_pages[:10]}...")
-                
-                # Count requirements by type
-                requirements_by_type = {}
-                for section in extractor.registry.sections:
-                    for req in section.requirements:
-                        req_type = req.type.value if hasattr(req.type, 'value') else (req.type if req.type else "Other")
-                        requirements_by_type[req_type] = requirements_by_type.get(req_type, 0) + 1
-                
-                crud.create_or_update_coverage_metrics(
-                    db=db,
-                    document_id=db_document.id,
-                    total_pages=len(extractor.pages),
-                    processed_pages=processed_pages,
-                    skipped_pages=skipped_pages,
-                    requirements_count=extractor.registry.total_requirements,
-                    requirements_by_type=requirements_by_type,
-                )
-                
-                logger.info(f"[DB] Updated document {db_document.id} status and metrics")
-            except Exception as db_error:
-                print(f"[DB] FAILED to update metrics: {db_error}")
-                logger.warning(f"[DB] Failed to update document metrics: {db_error}")
-        
-        # Step 4: Save results
-        await send_progress("save", 90, "Saving results...")
-        registry_path = extractor.save_registry()
-        
-        logger.info(f"Registry saved to: {registry_path}")
-        logger.info(f"Registry path absolute: {registry_path.absolute()}")
-        
-        # Get usage report
-        usage_report = get_usage_report()
-        usage_report_path = output_dir / "usage_report.txt"
-        
-        # Determine provider name for report
-        provider_name = "OpenRouter" if config.provider == "openrouter" else "DeepSeek API"
-        usage_report.save_to_file(usage_report_path, provider_name=provider_name)
-        
-        logger.info(f"Usage report saved to: {usage_report_path}")
-        
-        await send_progress("save", 95, "Generating reports...")
-        
-        # Step 5: Generate Word document if requested
-        word_path = None
-        if generate_word:
-            await send_progress("word", 97, "Generating Word document...")
-            word_path = await generate_word_document(
-                extractor,
-                usage_report,
-                output_dir
-            )
-        
-        # Calculate processing time
-        end_time = datetime.now()
-        processing_time = (end_time - start_time).total_seconds()
-        
-        await send_progress("complete", 100, "Processing complete!")
-        
-        # Update document status to completed
-        if db_document:
-            try:
-                db = next(get_db())
-                crud.update_document_status(
-                    db=db,
-                    document_id=db_document.id,
-                    status="completed",
-                )
-                logger.info(f"[DB] Document {db_document.id} marked as completed")
-            except Exception as db_error:
-                logger.warning(f"[DB] Failed to update document status: {db_error}")
-        
-        # Prepare response with proper path handling
-        cwd = Path.cwd()
-        
-        def get_relative_path(path: Path) -> str:
-            """Safely get relative path."""
-            try:
-                # Try to make absolute paths relative
-                if not path.is_absolute():
-                    path = path.absolute()
-                return str(path.relative_to(cwd))
-            except (ValueError, Exception):
-                # If relative_to fails, return the path as-is
-                return str(path).replace('\\', '/')
-        
-        files = {
-            "registry": get_relative_path(registry_path),
-            "usage_report": get_relative_path(usage_report_path),
-        }
-        
-        if word_path:
-            files["word_document"] = get_relative_path(word_path)
-        
-        result = ExtractionResult(
-            success=True,
-            message="Requirements extracted successfully",
-            requirements_count=extractor.registry.total_requirements,
-            sections_count=len(extractor.registry.sections),
-            total_tokens=usage_report.total_tokens,
-            total_cost=usage_report.total_cost,
-            processing_time=processing_time,
-            files=files,
-            model_used=model,
-            document_id=db_document.id if db_document else None
+        service = ExtractionService(
+            file_content=content,
+            filename=file.filename,
+            model=model,
+            generate_word=generate_word,
+            project_id=int(project_id) if project_id else None,
+            ws_manager=manager,
+            event_loop=current_loop,
+            progress_callback=send_progress,
         )
-        
-        logger.info(f"Extraction completed: {result.requirements_count} requirements")
-        logger.info(f"Files prepared for download:")
-        for file_type, file_path in files.items():
-            logger.info(f"  {file_type}: {file_path}")
-        
-        # Remove WebSocket handlers
-        api_logger.removeHandler(ws_handler)
-        openrouter_logger.removeHandler(ws_handler)
-        extractor_logger.removeHandler(ws_handler)
-        pdf_logger.removeHandler(ws_handler)
-        
-        # Return result
-        result_dict = result.model_dump()
-        print(f"[RESPONSE] document_id={result_dict.get('document_id')}, model_used={result_dict.get('model_used')}")
-        
+        result_dict = await service.run(db_session)
+        await send_progress("complete", 100, "Processing complete!")
+        logger.info(f"[RESPONSE] document_id={result_dict.get('document_id')}, model_used={result_dict.get('model_used')}")
         return result_dict
-        
+    except ValueError as e:
+        logger.error(f"[INIT] Invalid model '{model}': {e}")
+        await send_progress("error", 0, f"Ошибка: Неверная модель '{model}'")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model '{model}'. Available models: claude-sonnet-4.5, claude-opus-4.6, gpt-4.1, qwen-3.5-plus, gemini-3.1-pro",
+        )
     except Exception as e:
         logger.error(f"Extraction failed: {e}", exc_info=True)
         await send_progress("error", 0, f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Always cleanup temporary directory
-        if output_dir and output_dir.exists():
-            try:
-                import shutil
-                shutil.rmtree(output_dir)
-                logger.info(f"[CLEANUP] Removed temporary directory: {output_dir}")
-            except Exception as cleanup_error:
-                logger.warning(f"[CLEANUP] Failed to remove temporary directory: {cleanup_error}")
-
-
-async def generate_word_document(
-    extractor: RequirementsExtractor,
-    usage_report,
-    output_dir: Path
-) -> Path:
-    """
-    Generate Word document with requirements and usage report.
-    
-    Args:
-        extractor: Requirements extractor instance
-        usage_report: Usage report instance
-        output_dir: Output directory
-    
-    Returns:
-        Path to generated Word document
-    """
-    try:
-        from docx import Document
-        from docx.shared import Inches, Pt, RGBColor
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        
-        doc = Document()
-        
-        # Add title
-        title = doc.add_heading('Реестр требований', 0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Add metadata
-        doc.add_paragraph(f"Дата создания: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
-        doc.add_paragraph(f"Всего требований: {extractor.registry.total_requirements}")
-        doc.add_paragraph(f"Всего разделов: {len(extractor.registry.sections)}")
-        doc.add_paragraph("")
-        
-        # Add requirements by section
-        doc.add_heading('Требования по разделам', 1)
-        
-        for section in extractor.registry.sections:
-            doc.add_heading(section.full_title, 2)
-            doc.add_paragraph(f"Страницы: {section.page_range}")
-            doc.add_paragraph(f"Требований: {len(section.requirements)}")
-            doc.add_paragraph("")
-            
-            if section.requirements:
-                # Create table
-                table = doc.add_table(rows=1, cols=4)
-                table.style = 'Light Grid Accent 1'
-                
-                # Header row
-                header_cells = table.rows[0].cells
-                header_cells[0].text = 'ID'
-                header_cells[1].text = 'Требование'
-                header_cells[2].text = 'Тип'
-                header_cells[3].text = 'Приоритет'
-                
-                # Add requirements
-                for req in section.requirements:
-                    row_cells = table.add_row().cells
-                    row_cells[0].text = req.id
-                    row_cells[1].text = req.text
-                    row_cells[2].text = req.type.value if hasattr(req.type, 'value') else str(req.type or '')
-                    row_cells[3].text = req.priority.value if hasattr(req.priority, 'value') else str(req.priority or '')
-                
-                doc.add_paragraph("")
-        
-        # Add usage report
-        doc.add_page_break()
-        doc.add_heading('Отчет о затратах', 1)
-        
-        doc.add_paragraph(f"Всего вызовов API: {usage_report.calls_count}")
-        doc.add_paragraph(f"Входных токенов: {usage_report.total_input_tokens:,}")
-        doc.add_paragraph(f"Выходных токенов: {usage_report.total_output_tokens:,}")
-        doc.add_paragraph(f"Всего токенов: {usage_report.total_tokens:,}")
-        doc.add_paragraph("")
-        
-        # Cost with formatting
-        cost_para = doc.add_paragraph()
-        cost_run = cost_para.add_run(f"Общая стоимость: ${usage_report.total_cost:.4f} USD")
-        cost_run.bold = True
-        cost_run.font.size = Pt(14)
-        cost_run.font.color.rgb = RGBColor(0, 128, 0)
-        
-        doc.add_paragraph("")
-        
-        # Breakdown by section
-        doc.add_heading('Детализация по разделам', 2)
-        
-        stats = usage_report.get_stats_by_section()
-        table = doc.add_table(rows=1, cols=4)
-        table.style = 'Light Grid Accent 1'
-        
-        header_cells = table.rows[0].cells
-        header_cells[0].text = 'Раздел'
-        header_cells[1].text = 'Вызовов'
-        header_cells[2].text = 'Токенов'
-        header_cells[3].text = 'Стоимость'
-        
-        for section_name, section_stats in sorted(stats.items()):
-            row_cells = table.add_row().cells
-            row_cells[0].text = section_name
-            row_cells[1].text = str(section_stats['calls'])
-            row_cells[2].text = f"{section_stats['input_tokens'] + section_stats['output_tokens']:,}"
-            row_cells[3].text = f"${section_stats['cost']:.4f}"
-        
-        # Save document
-        word_path = output_dir / "requirements_report.docx"
-        doc.save(word_path)
-        
-        logger.info(f"Word document generated: {word_path}")
-        return word_path
-        
-    except ImportError:
-        logger.warning("python-docx not installed, skipping Word generation")
-        return None
+        for log_name in ("api", "src.openrouter_client", "src.requirements_extractor", "src.pdf_processor"):
+            logging.getLogger(log_name).removeHandler(ws_handler)
 
 
 # ========== Database API Endpoints ==========
@@ -1180,10 +459,10 @@ async def get_all_documents(
     skip: int = 0,
     limit: int = 100,
     project_id: Optional[int] = Query(None, description="Filter by project"),
+    db=Depends(get_db),
 ):
     """Get all documents with pagination. Optionally filter by project."""
     try:
-        db = next(get_db())
         if project_id:
             documents = crud.get_documents_by_project(db, project_id)
         else:
@@ -1210,7 +489,7 @@ async def get_all_documents(
 
 
 @app.get("/api/documents/{document_id}")
-async def get_document(document_id: int):
+async def get_document(document_id: int, db=Depends(get_db)):
     """Get document by ID with full metadata.
     
     Args:
@@ -1220,7 +499,6 @@ async def get_document(document_id: int):
         Document with metadata
     """
     try:
-        db = next(get_db())
         document = crud.get_document(db, document_id)
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -1250,6 +528,7 @@ async def get_requirements(
     type: Optional[str] = None,
     skip: int = 0,
     limit: int = 1000,
+    db=Depends(get_db),
 ):
     """Get requirements for a document with optional filters.
     
@@ -1264,8 +543,6 @@ async def get_requirements(
         List of requirements with metadata
     """
     try:
-        db = next(get_db())
-        
         # Verify document exists
         document = crud.get_document(db, document_id)
         if not document:
@@ -1294,8 +571,8 @@ async def get_requirements(
                     "id": req.id,
                     "requirement_id": req.requirement_id,
                     "text": req.text,
-                    "type": req.type,  # Already a string in DB
-                    "priority": req.priority,  # Already a string in DB
+                    "type": req.type,
+                    "priority": req.priority,
                     "page_number": req.page_number,
                     "status": req.status,
                     "ai_suggested": req.ai_suggested,
@@ -1303,6 +580,9 @@ async def get_requirements(
                     "edit_reason": req.edit_reason,
                     "edited_at": req.edited_at.isoformat() if req.edited_at else None,
                     "section_id": req.section_id,
+                    "section_number": req.section.section_number if req.section else None,
+                    "section_title": req.section.title if req.section else None,
+                    "subitems": req.subitems if hasattr(req, 'subitems') else None,
                     "created_at": req.created_at.isoformat() if req.created_at else None,
                 }
                 for req in requirements
@@ -1317,7 +597,7 @@ async def get_requirements(
 
 
 @app.get("/api/documents/{document_id}/metrics")
-async def get_metrics(document_id: int):
+async def get_metrics(document_id: int, db=Depends(get_db)):
     """Get coverage metrics for a document.
     
     Args:
@@ -1327,8 +607,6 @@ async def get_metrics(document_id: int):
         Coverage metrics with statistics
     """
     try:
-        db = next(get_db())
-        
         # Verify document exists
         document = crud.get_document(db, document_id)
         if not document:
@@ -1356,7 +634,7 @@ async def get_metrics(document_id: int):
 
 
 @app.get("/api/requirements/{requirement_id}")
-async def get_requirement(requirement_id: int):
+async def get_requirement(requirement_id: int, db=Depends(get_db)):
     """Get requirement by ID with full details.
     
     Args:
@@ -1366,7 +644,6 @@ async def get_requirement(requirement_id: int):
         Requirement with full metadata including audit trail
     """
     try:
-        db = next(get_db())
         requirement = crud.get_requirement(db, requirement_id)
         if not requirement:
             raise HTTPException(status_code=404, detail="Requirement not found")
@@ -1398,7 +675,7 @@ async def get_requirement(requirement_id: int):
 # ========== Review API Endpoints ==========
 
 @app.post("/api/requirements/{requirement_id}/accept")
-async def accept_requirement_endpoint(requirement_id: int):
+async def accept_requirement_endpoint(requirement_id: int, db=Depends(get_db)):
     """Accept a requirement (mark as accepted).
     
     Marks the requirement as accepted, meaning the AI-suggested text
@@ -1411,7 +688,6 @@ async def accept_requirement_endpoint(requirement_id: int):
         Updated requirement with status 'accepted'
     """
     try:
-        db = next(get_db())
         requirement = crud.accept_requirement(db, requirement_id)
         
         if not requirement:
@@ -1437,7 +713,8 @@ async def accept_requirement_endpoint(requirement_id: int):
 @app.post("/api/requirements/{requirement_id}/reject")
 async def reject_requirement_endpoint(
     requirement_id: int,
-    request: Optional[RejectRequirementRequest] = None
+    request: Optional[RejectRequirementRequest] = None,
+    db=Depends(get_db),
 ):
     """Reject a requirement (mark as rejected).
     
@@ -1452,8 +729,6 @@ async def reject_requirement_endpoint(
         Updated requirement with status 'rejected'
     """
     try:
-        db = next(get_db())
-        
         # Handle optional request body
         reason = request.reason if request else None
         
@@ -1482,7 +757,8 @@ async def reject_requirement_endpoint(
 @app.post("/api/requirements/{requirement_id}/edit")
 async def edit_requirement_endpoint(
     requirement_id: int,
-    request: EditRequirementRequest
+    request: EditRequirementRequest,
+    db=Depends(get_db),
 ):
     """Edit a requirement (mark as modified).
     
@@ -1497,7 +773,6 @@ async def edit_requirement_endpoint(
         Updated requirement with status 'modified' and audit trail
     """
     try:
-        db = next(get_db())
         requirement = crud.edit_requirement(
             db=db,
             requirement_id=requirement_id,
@@ -1531,7 +806,7 @@ async def edit_requirement_endpoint(
 
 
 @app.get("/api/documents/{document_id}/pdf")
-async def get_document_pdf(document_id: int):
+async def get_document_pdf(document_id: int, db=Depends(get_db)):
     """Get PDF file for document viewer.
     
     Returns the original PDF file for viewing in browser.
@@ -1546,7 +821,6 @@ async def get_document_pdf(document_id: int):
         HTTPException: 404 if document or file not found
     """
     try:
-        db = next(get_db())
         document = crud.get_document(db, document_id)
         
         if not document:
@@ -1556,12 +830,10 @@ async def get_document_pdf(document_id: int):
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="PDF file not found")
         
-        return StreamingResponse(
-            open(file_path, "rb"),
+        return FileResponse(
+            path=file_path,
             media_type="application/pdf",
-            headers={
-                "Content-Disposition": "inline",
-            }
+            headers={"Content-Disposition": "inline"},
         )
     except HTTPException:
         raise
@@ -1629,10 +901,11 @@ async def download_file(path: str) -> FileResponse:
 async def get_projects(db=Depends(get_db)):
     """Get all projects."""
     projects = crud.get_all_projects(db)
+    project_ids = [p.id for p in projects]
+    counts = crud.get_project_counts(db, project_ids) if project_ids else {}
     result = []
     for p in projects:
-        doc_count = len(p.documents) if p.documents else 0
-        req_count = sum(len(d.requirements) for d in p.documents) if p.documents else 0
+        c = counts.get(p.id, {"doc_count": 0, "req_count": 0})
         result.append({
             "id": p.id,
             "name": p.name,
@@ -1641,8 +914,8 @@ async def get_projects(db=Depends(get_db)):
             "status": p.status,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-            "documents_count": doc_count,
-            "requirements_count": req_count,
+            "documents_count": c["doc_count"],
+            "requirements_count": c["req_count"],
         })
     return {"projects": result}
 
@@ -1679,9 +952,11 @@ async def get_project(project_id: int, db=Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
     
     documents = crud.get_documents_by_project(db, project_id)
+    doc_ids = [d.id for d in documents]
+    req_counts = crud.get_document_req_counts(db, doc_ids) if doc_ids else {}
     docs_data = []
     for doc in documents:
-        req_count = len(doc.requirements) if doc.requirements else 0
+        req_count = req_counts.get(doc.id, 0)
         docs_data.append({
             "id": doc.id,
             "filename": doc.filename,
@@ -1745,124 +1020,33 @@ async def delete_project(project_id: int, db=Depends(get_db)):
 @app.get("/api/documents/{document_id}/export/word")
 async def export_word(
     document_id: int,
-    db = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
 ):
-    """
-    Generate Word document from database data on-the-fly.
-    
-    Args:
-        document_id: Document ID
-        
-    Returns:
-        FileResponse with Word document
-    """
+    """Generate Word document from database data on-the-fly."""
+    from src.word_exporter import generate_word_from_db
+
+    document = crud.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
     try:
-        import tempfile
-        from docx import Document as DocxDocument
-        from docx.shared import Pt, RGBColor
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        
-        logger.info(f"[EXPORT] Generating Word document for document {document_id}")
-        
-        # Fetch data from DB
-        document = crud.get_document(db, document_id)
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
         sections = crud.get_sections_by_document(db, document_id)
         all_requirements = crud.get_requirements_by_document(db, document_id)
         metrics = crud.get_coverage_metrics(db, document_id)
-        
-        # Create Word document
-        doc = DocxDocument()
-        
-        # Title
-        title = doc.add_heading('Реестр требований', 0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Metadata
-        doc.add_paragraph(f"Документ: {document.filename}")
-        doc.add_paragraph(f"Дата обработки: {document.uploaded_at.strftime('%d.%m.%Y %H:%M')}")
-        doc.add_paragraph(f"Всего требований: {len(all_requirements)}")
-        doc.add_paragraph(f"Всего разделов: {len(sections)}")
-        doc.add_paragraph("")
-        
-        # Requirements by section
-        doc.add_heading('Требования по разделам', 1)
-        
-        for section in sections:
-            # Get requirements for this section
-            section_requirements = [r for r in all_requirements if r.section_id == section.id]
-            
-            doc.add_heading(section.title, 2)
-            doc.add_paragraph(f"Страницы: {section.page_start} - {section.page_end}")
-            doc.add_paragraph(f"Требований: {len(section_requirements)}")
-            doc.add_paragraph("")
-            
-            if section_requirements:
-                # Create table
-                table = doc.add_table(rows=1, cols=5)
-                table.style = 'Light Grid Accent 1'
-                
-                # Header
-                header_cells = table.rows[0].cells
-                header_cells[0].text = 'ID'
-                header_cells[1].text = 'Требование'
-                header_cells[2].text = 'Тип'
-                header_cells[3].text = 'Приоритет'
-                header_cells[4].text = 'Страница'
-                
-                # Add requirements
-                for req in section_requirements:
-                    row_cells = table.add_row().cells
-                    row_cells[0].text = req.requirement_id or ''
-                    row_cells[1].text = req.text or ''
-                    row_cells[2].text = req.type or ''
-                    row_cells[3].text = req.priority or ''
-                    row_cells[4].text = str(req.page_number or '')
-                
-                doc.add_paragraph("")
-        
-        # Coverage metrics
-        if metrics:
-            doc.add_page_break()
-            doc.add_heading('Метрики покрытия', 1)
-            
-            doc.add_paragraph(f"Всего страниц: {metrics.total_pages}")
-            doc.add_paragraph(f"Обработано страниц: {metrics.processed_pages}")
-            doc.add_paragraph(f"Пропущено страниц: {len(metrics.skipped_pages) if metrics.skipped_pages else 0}")
-            doc.add_paragraph(f"Покрытие: {metrics.coverage_percent:.1f}%")
-            doc.add_paragraph("")
-            
-            # Requirements by type
-            doc.add_heading('Требования по типам', 2)
-            if metrics.requirements_by_type:
-                table = doc.add_table(rows=1, cols=2)
-                table.style = 'Light Grid Accent 1'
-                
-                header_cells = table.rows[0].cells
-                header_cells[0].text = 'Тип'
-                header_cells[1].text = 'Количество'
-                
-                for req_type, count in metrics.requirements_by_type.items():
-                    row_cells = table.add_row().cells
-                    row_cells[0].text = req_type
-                    row_cells[1].text = str(count)
-        
-        # Save to temporary file
-        temp_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.docx', delete=False)
-        doc.save(temp_file.name)
-        temp_file.close()
-        
-        logger.info(f"[EXPORT] Word document generated: {temp_file.name}")
-        
-        # Return file (will be cleaned up by OS later)
+
+        tmp_path = generate_word_from_db(document, sections, all_requirements, metrics)
+        if tmp_path is None:
+            raise HTTPException(status_code=500, detail="python-docx not available")
+
+        background_tasks.add_task(os.unlink, tmp_path)
         return FileResponse(
-            temp_file.name,
-            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            filename=f"{document.filename}_requirements.docx"
+            tmp_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=f"{document.filename}_requirements.docx",
         )
-        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[EXPORT] Word generation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1871,7 +1055,8 @@ async def export_word(
 @app.get("/api/documents/{document_id}/export/json")
 async def export_json(
     document_id: int,
-    db = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
 ):
     """
     Generate JSON registry from database data on-the-fly.
@@ -1883,8 +1068,6 @@ async def export_json(
         JSON response with requirements registry
     """
     try:
-        import tempfile
-        
         logger.info(f"[EXPORT] Generating JSON registry for document {document_id}")
         
         # Fetch data from DB
@@ -1921,7 +1104,11 @@ async def export_json(
                         "type": req.type,
                         "priority": req.priority,
                         "page_number": req.page_number,
-                        "status": req.status
+                        "section_number": section.section_number,
+                        "section_title": section.title,
+                        "status": req.status,
+                        "human_edited": req.human_edited,
+                        "edit_reason": req.edit_reason,
                     }
                     for req in section_requirements
                 ]
@@ -1935,7 +1122,7 @@ async def export_json(
         
         logger.info(f"[EXPORT] JSON registry generated: {temp_file.name}")
         
-        # Return file
+        background_tasks.add_task(os.unlink, temp_file.name)
         return FileResponse(
             temp_file.name,
             media_type='application/json',
@@ -1950,7 +1137,8 @@ async def export_json(
 @app.get("/api/documents/{document_id}/export/txt")
 async def export_txt(
     document_id: int,
-    db = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
 ):
     """
     Generate TXT usage report from database data on-the-fly.
@@ -1962,8 +1150,6 @@ async def export_txt(
         TXT file with processing statistics
     """
     try:
-        import tempfile
-        
         logger.info(f"[EXPORT] Generating TXT report for document {document_id}")
         
         # Fetch data from DB
@@ -2039,7 +1225,7 @@ async def export_txt(
         
         logger.info(f"[EXPORT] TXT report generated: {temp_file.name}")
         
-        # Return file
+        background_tasks.add_task(os.unlink, temp_file.name)
         return FileResponse(
             temp_file.name,
             media_type='text/plain',

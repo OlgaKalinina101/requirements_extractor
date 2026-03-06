@@ -1,279 +1,192 @@
-# 🎨 PDF Processing - Visual Flow Diagram
+# PDF Processing — Visual Flow Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        1. UPLOAD & VALIDATION                           │
-│  User uploads PDF → FastAPI endpoint → Save to data/uploads/           │
-│  Create Document record in DB (status: "pending")                      │
+│                                                                         │
+│  POST /api/extract (multipart: file, model, generate_word, project_id) │
+│  └─ Validation: file.endswith('.pdf')                                   │
+│  └─ Save to: data/uploads/{timestamp}_{filename}.pdf                   │
+│  └─ Create Document record in DB (status: "pending")                   │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                     2. PDF EXTRACTION (PARALLEL)                        │
 │                                                                         │
-│  ThreadPoolExecutor (auto workers)                                     │
+│  ThreadPoolExecutor — все страницы параллельно                         │
+│                                                                         │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐       ┌──────────┐         │
 │  │ Thread 1 │  │ Thread 2 │  │ Thread 3 │  ...  │ Thread N │         │
 │  │  Page 1  │  │  Page 2  │  │  Page 3  │       │  Page N  │         │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘       └────┬─────┘         │
 │       │             │             │                    │                │
 │       ▼             ▼             ▼                    ▼                │
-│  pymupdf4llm    pymupdf4llm   pymupdf4llm        pymupdf4llm           │
-│  - Extract text - Extract text - Extract text    - Extract text        │
-│  - Save images  - Save images  - Save images     - Save images         │
-│       │             │             │                    │                │
-│       ▼             ▼             ▼                    ▼                │
-│  ┌─────────────────────────────────────────────────────────┐           │
-│  │  Output:                                                │           │
-│  │  pages[] = ["Page 1 text", "Page 2 text", ...]        │           │
-│  │  image_metadata = {                                     │           │
-│  │    1: [],  # No images                                  │           │
-│  │    5: [{filename: "page_5_image_0.png", ...}],         │           │
-│  │    10: [{...}, {...}]  # 2 images                       │           │
-│  │  }                                                      │           │
-│  └─────────────────────────────────────────────────────────┘           │
-│                                                                         │
-│  Images saved to: data/output/{timestamp}/images/                     │
-│  Format: page_{N}_image_{I}.png                                       │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         3. TOC PARSING                                  │
-│                                                                         │
-│  Take first 10 pages → Send to AI → Parse Table of Contents           │
-│                                                                         │
-│  Input:  "1. Введение ... стр. 1"                                     │
-│          "2. Требования ... стр. 10"                                   │
-│          "2.1 Общие ... стр. 10"                                       │
-│          "3. Технические ... стр. 33"                                  │
-│                                                                         │
-│  Output: [                                                             │
-│    {number: "1", title: "Введение", page_start: 1},                   │
-│    {number: "2", title: "Требования", page_start: 10},                │
-│    {number: "2.1", title: "Общие", page_start: 10},                   │
-│    {number: "3", title: "Технические", page_start: 33}                │
+│  pymupdf4llm → markdown text + PNG/JPG images                          │
+│       │                                                                 │
+│       ▼                                                                 │
+│  pages = [                                                             │
+│    {"page_number": 1, "text": "..."},                                  │
+│    {"page_number": 2, "text": "..."},                                  │
+│    ...                                                                  │
 │  ]                                                                     │
 │                                                                         │
-│  Fallback: If TOC parsing fails → create automatic sections (~20pp)   │
+│  page_image_metadata = {                                               │
+│    5:  [{"path": ".../page_5_image_0.png", ...}],                     │
+│    10: [{"path": ".../page_10_image_0.png", ...},                     │
+│         {"path": ".../page_10_image_1.png", ...}]                     │
+│  }                                                                     │
+│                                                                         │
+│  Images: output_dir/images/page_{N}_image_{I}.{ext}                   │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│               4. REQUIREMENTS EXTRACTION (BY SECTIONS)                  │
+│              3. AI EXTRACTION (PAGE BATCHES, batch_size=7)              │
 │                                                                         │
-│  FOR EACH SECTION:                                                     │
+│  Батч 1: страницы 1-7 (asyncio.gather)                                │
+│  ┌────────────────────────────────────────────────────────────────┐   │
+│  │ Page 1  Page 2  Page 3  Page 4  Page 5  Page 6  Page 7        │   │
+│  │   │       │       │       │       │       │       │            │   │
+│  │   ▼       ▼       ▼       ▼       ▼       ▼       ▼            │   │
+│  │ run_in_executor (thread pool) — синхронный HTTP-запрос         │   │
+│  │   │                                                             │   │
+│  │   ├─ TEXT: OpenRouter.extract_requirements(page_text)          │   │
+│  │   │         → [Requirement, Requirement, ...]                  │   │
+│  │   │                                                             │   │
+│  │   └─ IMAGES (если есть): OpenRouter.extract_requirements_from_image()│
+│  │         image encoded to Base64 → multimodal API request       │   │
+│  │         → [Requirement, Requirement, ...]                      │   │
+│  └────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
-│  ┌───────────────────────────────────────────────────────────────┐    │
-│  │ Section 2: "Требования" (pages 10-32)                         │    │
-│  │                                                                 │    │
-│  │ Step 1: TEXT PROCESSING                                        │    │
-│  │ ┌─────────────────────────────────────────────────────────┐   │    │
-│  │ │ Combine pages 10-32 text                                │   │    │
-│  │ │ Send to AI: extract_requirements()                      │   │    │
-│  │ │ ↓                                                        │   │    │
-│  │ │ AI returns: [                                           │   │    │
-│  │ │   {id: "REQ-2-001", text: "...", type: "...", ...},    │   │    │
-│  │ │   {id: "REQ-2-002", text: "...", type: "...", ...},    │   │    │
-│  │ │   ...                                                    │   │    │
-│  │ │ ]                                                        │   │    │
-│  │ └─────────────────────────────────────────────────────────┘   │    │
-│  │                                                                 │    │
-│  │ Step 2: IMAGE PROCESSING                                       │    │
-│  │ ┌─────────────────────────────────────────────────────────┐   │    │
-│  │ │ Find images in pages 10-32                              │   │    │
-│  │ │ image_metadata[10] = [img_0.png, img_1.png]            │   │    │
-│  │ │ image_metadata[12] = [img_0.png]                        │   │    │
-│  │ │ image_metadata[31] = [img_0.png, img_1.png, img_2.png] │   │    │
-│  │ │                                                          │   │    │
-│  │ │ FOR EACH IMAGE (6 images total):                        │   │    │
-│  │ │   ┌──────────────────────────────────────────────┐     │   │    │
-│  │ │   │ page_10_image_0.png                          │     │   │    │
-│  │ │   │ ├─ Encode to Base64                          │     │   │    │
-│  │ │   │ ├─ Create multimodal message:                │     │   │    │
-│  │ │   │ │  {                                          │     │   │    │
-│  │ │   │ │    role: "user",                            │     │   │    │
-│  │ │   │ │    content: [                               │     │   │    │
-│  │ │   │ │      {type: "text", text: "Раздел 2..."},  │     │   │    │
-│  │ │   │ │      {type: "image_url", image_url: {...}} │     │   │    │
-│  │ │   │ │    ]                                        │     │   │    │
-│  │ │   │ │  }                                          │     │   │    │
-│  │ │   │ └─ Send to AI → Get requirements            │     │   │    │
-│  │ │   └──────────────────────────────────────────────┘     │   │    │
-│  │ │   (Same for img_1, img_2, ... img_6)                   │   │    │
-│  │ └─────────────────────────────────────────────────────────┘   │    │
-│  │                                                                 │    │
-│  │ Step 3: COMBINE & SAVE                                         │    │
-│  │ all_requirements = text_reqs + image_reqs                      │    │
-│  │ Save to DB: Section, Requirements                              │    │
-│  └───────────────────────────────────────────────────────────────┘    │
+│  Батч 2: страницы 8-14 ... (аналогично)                               │
+│  ...                                                                    │
+│  Батч N: последние страницы                                            │
 │                                                                         │
-│  REPEAT FOR ALL SECTIONS (5 sections total)                           │
+│  Прогресс WebSocket: completed_pages / total_pages → 30%–88%          │
 │                                                                         │
-│  Total AI requests:                                                    │
-│  - Text: 5 requests (one per section)                                 │
-│  - Images: 219 requests (one per image)                               │
-│  = 224 requests total                                                  │
+│  Retry-логика (до 3 попыток, backoff 2^n секунд):                     │
+│  ├─ Attempt 1 → parse JSON                                             │
+│  ├─ Attempt 2 (delay 1s) → если JSON parse error                      │
+│  └─ Attempt 3 (delay 2s) → если снова ошибка → return []              │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      5. METRICS CALCULATION                             │
+│                      4. SAVE TO DATABASE                                │
 │                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │ Find pages with requirements:                                   │  │
-│  │                                                                  │  │
-│  │ pages_with_requirements = set()                                 │  │
-│  │ for section in sections:                                        │  │
-│  │   for req in section.requirements:                              │  │
-│  │     pages_with_requirements.add(req.page_number)                │  │
-│  │                                                                  │  │
-│  │ Result: {10, 11, 12, 31, 32, 33, ...} = 23 pages                │  │
-│  │                                                                  │  │
-│  │ Calculate skipped:                                              │  │
-│  │ all_pages = {1, 2, 3, ..., 225}                                 │  │
-│  │ skipped = all_pages - pages_with_requirements                   │  │
-│  │ Result: [1, 2, 3, 4, 5, ...] = 202 pages                        │  │
-│  │                                                                  │  │
-│  │ Metrics:                                                         │  │
-│  │ ├─ total_pages: 225                                             │  │
-│  │ ├─ processed_pages: 23  (with requirements)                     │  │
-│  │ ├─ skipped_pages: [1,2,3,4,5,...]  (without requirements)      │  │
-│  │ ├─ coverage_percent: 10.2%                                      │  │
-│  │ ├─ requirements_count: 662                                      │  │
-│  │ └─ requirements_by_type: {...}                                  │  │
+│  │ sections (1 row)                                                │  │
+│  │   section_number="1", title="All Pages"                        │  │
+│  │   page_start=1, page_end=N                                     │  │
 │  └─────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
-│  Save to DB: coverage_metrics table                                    │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │ requirements (bulk INSERT, один SQL-запрос)                     │  │
+│  │   requirement_id, text, type, priority                         │  │
+│  │   page_number, source_page, source_type ("text"/"image")       │  │
+│  │   status="pending", ai_suggested=text                          │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      6. GENERATE REPORTS                                │
+│                      5. COVERAGE METRICS                                │
 │                                                                         │
-│  ├─ JSON registry: data/output/{timestamp}/registry.json              │
-│  │  └─ Contains: sections[], requirements[], metadata                 │
-│  │                                                                     │
-│  └─ Word document (optional): data/output/{timestamp}/result.docx     │
-│     └─ Formatted document with all requirements                        │
+│  pages_with_reqs = {r.source_page for r in requirements}               │
+│  skipped_pages = all_pages - pages_with_reqs                           │
+│  coverage_percent = len(pages_with_reqs) / total_pages * 100           │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │ coverage_metrics (1 row)                                        │  │
+│  │   total_pages: N                                               │  │
+│  │   processed_pages: M  (страницы с требованиями)                │  │
+│  │   skipped_pages: [1,2,3,...]                                   │  │
+│  │   coverage_percent: M/N * 100                                  │  │
+│  │   requirements_by_type: {"technical": 15, "functional": 8, ...}│  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  Document.status → "completed"                                         │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        7. UPDATE DB STATUS                              │
+│                     6. GENERATE REPORTS (опционально)                   │
 │                                                                         │
-│  Document status: "pending" → "processing" → "completed"              │
+│  ├─ JSON registry: output_dir/registry.json                           │
+│  └─ Word document: output_dir/requirements_report.docx                │
 │                                                                         │
-│  Final DB state:                                                       │
-│  ┌────────────────────────────────────────────────────────────────┐   │
-│  │ documents                                                       │   │
-│  │   id: 1                                                         │   │
-│  │   filename: "ЗТ УПН 04.pdf"                                     │   │
-│  │   status: "completed"                                           │   │
-│  │   total_pages: 225                                              │   │
-│  │                                                                  │   │
-│  │ sections (5 rows)                                               │   │
-│  │   └─ section_number, title, page_start, page_end               │   │
-│  │                                                                  │   │
-│  │ requirements (662 rows)                                         │   │
-│  │   └─ text, type, priority, page_number, source_type            │   │
-│  │      (source_type: "text" or "image")                           │   │
-│  │                                                                  │   │
-│  │ coverage_metrics (1 row)                                        │   │
-│  │   total_pages: 225                                              │   │
-│  │   processed_pages: 23                                           │   │
-│  │   skipped_pages: [1,2,3,...]                                    │   │
-│  │   coverage_percent: 10.2                                        │   │
-│  │   requirements_count: 662                                       │   │
-│  └────────────────────────────────────────────────────────────────┘   │
+│  Временный каталог удаляется после возврата ответа                    │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         7. RESPONSE                                     │
+│                                                                         │
+│  ExtractionResult:                                                     │
+│  {                                                                     │
+│    "success": true,                                                    │
+│    "requirements_count": 87,                                           │
+│    "sections_count": 1,                                                │
+│    "total_tokens": 45000,                                              │
+│    "total_cost": 0.23,                                                 │
+│    "processing_time": 245.3,                                           │
+│    "model_used": "claude-sonnet-4.5",                                  │
+│    "document_id": 42,                                                  │
+│    "files": {"registry": "...", "word_document": "..."}                │
+│  }                                                                     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Key Points Visualization
+---
 
-### Image Processing Flow
+## Пример обработки одной страницы
 
 ```
-PDF Page 10
+Page 10: "Насосы должны обеспечивать..."
     │
-    ├─ Text: "Насосы должны обеспечивать..."
-    │  └─ Sent to AI as part of Section 2 text
+    ├─ TEXT EXTRACTION
+    │  └─ Отправить в AI: текст страницы 10
+    │  └─ AI возвращает:
+    │       [
+    │         {id: "REQ-10-001", text: "Насосы должны...", type: "technical", priority: "mandatory"},
+    │         {id: "REQ-10-002", text: "Давление не менее...", type: "technical", priority: "mandatory"}
+    │       ]
     │
-    └─ Images: 2 images detected
+    └─ IMAGE EXTRACTION (page 10 имеет 2 изображения)
        │
-       ├─ Image 0: Technical drawing
-       │  ├─ Saved as: page_10_image_0.png
-       │  ├─ Encoded to Base64
-       │  ├─ Sent to AI (separate request)
-       │  └─ AI returns: [REQ-2-IMG-001, REQ-2-IMG-002, ...]
+       ├─ page_10_image_0.png (технический чертёж)
+       │   ├─ Encode to Base64
+       │   ├─ Multimodal request → AI
+       │   └─ AI возвращает:
+       │        [{id: "REQ-10-IMG-001", text: "Максимальный диаметр...", ...}]
        │
-       └─ Image 1: Table with specifications
-          ├─ Saved as: page_10_image_1.png
-          ├─ Encoded to Base64
-          ├─ Sent to AI (separate request)
-          └─ AI returns: [REQ-2-IMG-003, REQ-2-IMG-004, ...]
+       └─ page_10_image_1.png (таблица спецификаций)
+           ├─ Encode to Base64
+           ├─ Multimodal request → AI
+           └─ AI возвращает:
+                [{id: "REQ-10-IMG-002", text: "Вес не более...", ...},
+                 {id: "REQ-10-IMG-003", text: "Габариты...", ...}]
+
+Page 10 итого: 5 требований (2 текст + 3 изображения)
 ```
 
-### Section Processing Timeline
+---
+
+## Метрики покрытия — визуализация
 
 ```
-Section 2 (pages 10-32, 23 pages total)
-│
-├─ [00:00] Start processing section
-│
-├─ [00:01] Combine 23 pages of text
-│  └─ Send to AI (1 request, ~50K tokens)
-│
-├─ [00:15] AI response received
-│  └─ 145 text-based requirements extracted
-│
-├─ [00:16] Find images in pages 10-32
-│  └─ Found 6 images
-│
-├─ [00:17] Process image 1/6 (page_10_image_0.png)
-│  └─ AI response: 2 requirements
-│
-├─ [00:20] Process image 2/6 (page_10_image_1.png)
-│  └─ AI response: 3 requirements
-│
-├─ [00:23] Process image 3/6 (page_12_image_0.png)
-│  └─ AI response: 1 requirement
-│
-├─ [00:26] Process image 4/6 (page_31_image_0.png)
-│  └─ AI response: 5 requirements
-│
-├─ [00:29] Process image 5/6 (page_31_image_1.png)
-│  └─ AI response: 2 requirements
-│
-├─ [00:32] Process image 6/6 (page_31_image_2.png)
-│  └─ AI response: 4 requirements
-│
-└─ [00:33] Section complete
-   ├─ Text requirements: 145
-   ├─ Image requirements: 17
-   └─ Total: 162 requirements
+Документ: 25 страниц
 
-Section processing time: ~33 seconds
-Total AI requests: 7 (1 text + 6 images)
-```
+Страницы с требованиями (обработанные):
+  7, 8, 9, 10, 11, 12, 15, 16, 17, 18, 20, 21 = 12 страниц
 
-### Coverage Calculation
+Страницы без требований (пропущенные):
+  1, 2, 3, 4, 5, 6     — титул, оглавление
+  13, 14                — пустые/разделители
+  19                    — только схема (изображение без текста)
+  22, 23, 24, 25        — приложения, литература
+  = 13 страниц
 
-```
-Document: 225 pages
-│
-├─ Pages WITH requirements (processed):
-│  10, 11, 12, 31, 32, 33, 34, 35, 36, 37, 40, 41, 42, 43,
-│  50, 51, 52, 150, 151, 152, 153, 154, 155
-│  = 23 pages (10.2%)
-│
-└─ Pages WITHOUT requirements (skipped):
-   1, 2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, ..., 224, 225
-   = 202 pages (89.8%)
-   │
-   ├─ Title pages (1-5)
-   ├─ Table of contents (6-9)
-   ├─ Empty pages (various)
-   ├─ Appendices with only images/tables (180-220)
-   └─ References (221-225)
+Coverage: 12 / 25 * 100 = 48%
 ```

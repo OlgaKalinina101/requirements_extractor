@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -164,7 +165,7 @@ def parse_json_safely(content: str, context: str = "") -> Any:
                             item_str = content[item_start:i+1]
                             item = json.loads(item_str)
                             items.append(item)
-                        except:
+                        except json.JSONDecodeError:
                             pass
                         item_start = None
                 elif char == "]" and brace_count == 0:
@@ -193,6 +194,75 @@ class ModelInfo:
     speed: str  # fast, balanced, slow
     capability: str  # primary focus
     supports_images: bool = True  # Most OpenRouter models support images
+
+
+# Type and priority mappings shared across extraction methods
+TYPE_MAPPING: Dict[str, "RequirementType"] = {
+    # English values (from v2.1+ prompts)
+    "Supply": None,  # filled below after class import
+    "Technical": None,
+    "Functional": None,
+    "Performance": None,
+    "Safety": None,
+    "Documentation": None,
+    "Interface": None,
+    "Constraint": None,
+    "Process": None,
+    "Unknown": None,
+    # Russian values (backward compatibility)
+    "Техническое": None,
+    "Организационное": None,
+    "Документационное": None,
+    "Функциональное": None,
+    "Нефункциональное": None,
+    "Прочее": None,
+}
+
+PRIORITY_MAPPING: Dict[str, "RequirementPriority"] = {
+    # English values
+    "Mandatory": None,
+    "Recommended": None,
+    "Optional": None,
+    "Unknown": None,
+    # Russian values (backward compatibility)
+    "Обязательно": None,
+    "Желательно": None,
+    "Опционально": None,
+}
+
+
+def _build_mappings() -> None:
+    """Populate TYPE_MAPPING and PRIORITY_MAPPING after models are imported."""
+    TYPE_MAPPING.update({
+        "Supply": RequirementType.SUPPLY,
+        "Technical": RequirementType.TECHNICAL,
+        "Functional": RequirementType.FUNCTIONAL,
+        "Performance": RequirementType.PERFORMANCE,
+        "Safety": RequirementType.SAFETY,
+        "Documentation": RequirementType.DOCUMENTATION,
+        "Interface": RequirementType.INTERFACE,
+        "Constraint": RequirementType.CONSTRAINT,
+        "Process": RequirementType.PROCESS,
+        "Unknown": RequirementType.UNKNOWN,
+        "Техническое": RequirementType.TECHNICAL,
+        "Организационное": RequirementType.PROCESS,
+        "Документационное": RequirementType.DOCUMENTATION,
+        "Функциональное": RequirementType.FUNCTIONAL,
+        "Нефункциональное": RequirementType.CONSTRAINT,
+        "Прочее": RequirementType.UNKNOWN,
+    })
+    PRIORITY_MAPPING.update({
+        "Mandatory": RequirementPriority.MANDATORY,
+        "Recommended": RequirementPriority.RECOMMENDED,
+        "Optional": RequirementPriority.OPTIONAL,
+        "Unknown": RequirementPriority.UNKNOWN,
+        "Обязательно": RequirementPriority.MANDATORY,
+        "Желательно": RequirementPriority.RECOMMENDED,
+        "Опционально": RequirementPriority.OPTIONAL,
+    })
+
+
+_build_mappings()
 
 
 # Available models configuration
@@ -458,7 +528,7 @@ class OpenRouterClient:
         logger.debug(f"[IMAGE] User prompt length: {len(user_prompt_template)} chars")
         
         try:
-            response = self._make_request(messages, section=f"{section_number} - {section_title} (image)", temperature=0.7)
+            response = self._make_request(messages, section=f"{section_number} - {section_title} (image)", temperature=0.1)  # CHANGED from 0.7
             
             # Parse response
             content = response["choices"][0]["message"]["content"]
@@ -480,48 +550,25 @@ class OpenRouterClient:
             # Convert to Requirement objects
             requirements = []
             for item in requirements_data:
-                # Map Russian type names to enum values
-                type_str = item.get("type", "Техническое")
-                type_mapping = {
-                    # Russian values (from AI prompt)
-                    "Техническое": RequirementType.TECHNICAL,
-                    "Организационное": RequirementType.ORGANIZATIONAL,
-                    "Документационное": RequirementType.DOCUMENTATION,
-                    "Функциональное": RequirementType.FUNCTIONAL,
-                    "Нефункциональное": RequirementType.NON_FUNCTIONAL,
-                    "Прочее": RequirementType.OTHER,
-                    # English enum names (if AI returns them)
-                    "TECHNICAL": RequirementType.TECHNICAL,
-                    "ORGANIZATIONAL": RequirementType.ORGANIZATIONAL,
-                    "DOCUMENTATION": RequirementType.DOCUMENTATION,
-                    "FUNCTIONAL": RequirementType.FUNCTIONAL,
-                    "NON_FUNCTIONAL": RequirementType.NON_FUNCTIONAL,
-                    "OTHER": RequirementType.OTHER,
-                }
-                req_type = type_mapping.get(type_str, RequirementType.TECHNICAL)
-                
-                # Map Russian priority names to enum values
-                priority_str = item.get("priority", "Обязательно")
-                priority_mapping = {
-                    # Russian values
-                    "Обязательно": RequirementPriority.MANDATORY,
-                    "Желательно": RequirementPriority.RECOMMENDED,
-                    "Опционально": RequirementPriority.OPTIONAL,
-                    # English enum names (if AI returns them)
-                    "MANDATORY": RequirementPriority.MANDATORY,
-                    "RECOMMENDED": RequirementPriority.RECOMMENDED,
-                    "OPTIONAL": RequirementPriority.OPTIONAL,
-                }
-                req_priority = priority_mapping.get(priority_str, RequirementPriority.MANDATORY)
+                type_str = item.get("requirement_kind", item.get("type", "Unknown"))
+                req_type = TYPE_MAPPING.get(type_str, RequirementType.UNKNOWN)
+                priority_str = item.get("priority", "Unknown")
+                req_priority = PRIORITY_MAPPING.get(priority_str, RequirementPriority.UNKNOWN)
                 
                 req = Requirement(
-                    id=item.get("id", f"REQ-{section_number.replace('.', '')}-IMG-XXX"),
+                    id=item.get("temp_id", item.get("id", f"REQ-{section_number.replace('.', '')}-IMG-XXX")),
                     text=item.get("text", ""),
                     type=req_type,
                     priority=req_priority,
                     source_page=page_number,
                     section_number=section_number,
-                    source_type="image"  # Mark as from image
+                    source_type="image",
+                    subitems=item.get("subitems", []),
+                    source_quote=item.get("source_quote"),
+                    source_fragment=item.get("source_fragment"),
+                    visual_requirement_class=item.get("visual_requirement_class"),
+                    confidence=float(item.get("confidence", 0.8)),
+                    extraction_basis=item.get("extraction_basis", "image_text")
                 )
                 requirements.append(req)
             
@@ -560,7 +607,7 @@ class OpenRouterClient:
         try:
             prompt_loader = get_prompt_loader()
             system_message, user_prompt_template = prompt_loader.format_prompt(
-                "requirement_extractor",
+                "requirement_extractor_text",  # NEW prompt name
                 section_number=section_number,
                 section_title=section_title,
                 page_range=page_range,
@@ -589,72 +636,66 @@ class OpenRouterClient:
         logger.debug(f"[TEXT] System message length: {len(system_message)} chars")
         logger.debug(f"[TEXT] User prompt length: {len(user_prompt_template)} chars")
         
+        # Retry logic for JSON parsing errors
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                logger.info(f"[TEXT] Sending text to AI model: {self.selected_model} (attempt {attempt + 1}/{max_retries + 1})")
+                response = self._make_request(messages, section=f"{section_number} - {section_title}", temperature=0.1)
+                
+                # Parse response
+                content = response["choices"][0]["message"]["content"]
+                logger.info(f"[TEXT] Received response from AI, length: {len(content)} chars")
+                logger.debug(f"[TEXT] Response preview (first 500 chars): {content[:500]}")
+                
+                # Extract JSON array with safe parsing
+                parsed_data = parse_json_safely(content, context=f"text extraction for section {section_number}")
+                logger.info(f"[TEXT] Parsed JSON successfully, got {len(parsed_data) if isinstance(parsed_data, list) else 1} items")
+                
+                # If we got here, parsing succeeded - break retry loop
+                break
+                
+            except (ValueError, json.JSONDecodeError) as json_error:
+                if attempt < max_retries:
+                    delay = 2 ** attempt  # Exponential backoff: 1s, 2s
+                    logger.warning(f"[TEXT] JSON parse error on attempt {attempt + 1}: {json_error}. Retrying in {delay}s...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    logger.error(f"[TEXT] Failed to parse JSON after {max_retries + 1} attempts: {json_error}")
+                    logger.error(f"[TEXT] Raw response: {content[:1000]}")
+                    return []
+        
+        # Handle both list and dict formats
+        if isinstance(parsed_data, list):
+            requirements_data = parsed_data
+        elif isinstance(parsed_data, dict) and "requirements" in parsed_data:
+            requirements_data = parsed_data["requirements"]
+        else:
+            requirements_data = []
+        
         try:
-            logger.info(f"[TEXT] Sending text to AI model: {self.selected_model}")
-            response = self._make_request(messages, section=f"{section_number} - {section_title}", temperature=0.7)
-            
-            # Parse response
-            content = response["choices"][0]["message"]["content"]
-            logger.info(f"[TEXT] Received response from AI, length: {len(content)} chars")
-            logger.debug(f"[TEXT] Response preview (first 500 chars): {content[:500]}")
-            
-            # Extract JSON array with safe parsing
-            parsed_data = parse_json_safely(content, context=f"text extraction for section {section_number}")
-            logger.info(f"[TEXT] Parsed JSON successfully, got {len(parsed_data) if isinstance(parsed_data, list) else 1} items")
-            
-            # Handle both list and dict formats
-            if isinstance(parsed_data, list):
-                requirements_data = parsed_data
-            elif isinstance(parsed_data, dict) and "requirements" in parsed_data:
-                requirements_data = parsed_data["requirements"]
-            else:
-                requirements_data = []
-            
             # Convert to Requirement objects
             requirements = []
             for item in requirements_data:
-                # Map Russian type names to enum values
-                type_str = item.get("type", "Техническое")
-                type_mapping = {
-                    # Russian values (from AI prompt)
-                    "Техническое": RequirementType.TECHNICAL,
-                    "Организационное": RequirementType.ORGANIZATIONAL,
-                    "Документационное": RequirementType.DOCUMENTATION,
-                    "Функциональное": RequirementType.FUNCTIONAL,
-                    "Нефункциональное": RequirementType.NON_FUNCTIONAL,
-                    "Прочее": RequirementType.OTHER,
-                    # English enum names (if AI returns them)
-                    "TECHNICAL": RequirementType.TECHNICAL,
-                    "ORGANIZATIONAL": RequirementType.ORGANIZATIONAL,
-                    "DOCUMENTATION": RequirementType.DOCUMENTATION,
-                    "FUNCTIONAL": RequirementType.FUNCTIONAL,
-                    "NON_FUNCTIONAL": RequirementType.NON_FUNCTIONAL,
-                    "OTHER": RequirementType.OTHER,
-                }
-                req_type = type_mapping.get(type_str, RequirementType.TECHNICAL)
-                
-                # Map Russian priority names to enum values
-                priority_str = item.get("priority", "Обязательно")
-                priority_mapping = {
-                    # Russian values
-                    "Обязательно": RequirementPriority.MANDATORY,
-                    "Желательно": RequirementPriority.RECOMMENDED,
-                    "Опционально": RequirementPriority.OPTIONAL,
-                    # English enum names (if AI returns them)
-                    "MANDATORY": RequirementPriority.MANDATORY,
-                    "RECOMMENDED": RequirementPriority.RECOMMENDED,
-                    "OPTIONAL": RequirementPriority.OPTIONAL,
-                }
-                req_priority = priority_mapping.get(priority_str, RequirementPriority.MANDATORY)
+                type_str = item.get("requirement_kind", item.get("type", "Unknown"))
+                req_type = TYPE_MAPPING.get(type_str, RequirementType.UNKNOWN)
+                priority_str = item.get("priority", "Unknown")
+                req_priority = PRIORITY_MAPPING.get(priority_str, RequirementPriority.UNKNOWN)
                 
                 req = Requirement(
-                    id=item.get("id", f"REQ-{section_number.replace('.', '')}-XXX"),
+                    id=item.get("temp_id", item.get("id", f"REQ-{section_number.replace('.', '')}-XXX")),
                     text=item.get("text", ""),
                     type=req_type,
                     priority=req_priority,
                     source_page=None,  # Will be set by caller from page_start
                     section_number=section_number,
-                    source_type="text"  # Mark as from text
+                    source_type="text",
+                    subitems=item.get("subitems", []),
+                    source_quote=item.get("source_quote"),
+                    source_fragment=item.get("source_fragment"),
+                    confidence=float(item.get("confidence", 1.0)),
+                    extraction_basis=item.get("extraction_basis")
                 )
                 requirements.append(req)
             
@@ -668,104 +709,6 @@ class OpenRouterClient:
         except Exception as e:
             logger.error(f"[TEXT] Failed to extract requirements from section {section_number} using {self.selected_model}: {e}")
             logger.exception(e)  # Full traceback for debugging
-            return []
-    
-    def parse_table_of_contents(self, text: str) -> List[Dict[str, Any]]:
-        """Parse table of contents from document text.
-        
-        Args:
-            text: Document text to parse for TOC
-            
-        Returns:
-            List of TOC entries as dictionaries
-        """
-        logger.info(f"[TOC] Parsing table of contents using {self.selected_model}")
-        
-        # Load prompt from YAML
-        # Use more text for large documents — TOC might be deeper than 5000 chars
-        toc_text_limit = 15000
-        toc_text_truncated = text[:toc_text_limit]
-        logger.info(f"[TOC] Sending {len(toc_text_truncated)} chars to AI (from {len(text)} total)")
-        
-        try:
-            prompt_loader = get_prompt_loader()
-            system_message, user_prompt_template = prompt_loader.format_prompt(
-                "toc_parser",
-                toc_text=toc_text_truncated
-            )
-            logger.debug(f"[TOC] Loaded prompt template from YAML")
-        except Exception as e:
-            logger.warning(f"[TOC] Failed to load prompt from YAML: {e}, using default")
-            # Fallback to default prompt
-            system_message = """Ты — эксперт по разбору технических заданий на русском языке.
-У меня есть текст из начала PDF-документа.
-
-Задача:
-1. Найди оглавление в тексте.
-2. Очисти весь мусор (таблицы, инв.№, подписи и т.д.).
-3. Построй иерархическую структуру.
-4. Для каждого раздела укажи page_start (номер страницы начала).
-5. Верни ТОЛЬКО валидный JSON в таком формате:
-
-{
-  "toc": [
-    {
-      "level": 1,
-      "number": "1.",
-      "title": "Общие положения",
-      "page_start": 4,
-      "children": []
-    },
-    {
-      "level": 2,
-      "number": "2.1.",
-      "title": "Технические характеристики площадки компрессоров",
-      "page_start": 6,
-      "children": []
-    }
-  ]
-}
-
-Будь максимально точен с номерами страниц. Не добавляй ничего лишнего."""
-            user_prompt_template = f"""Вот текст из начала документа:
-```
-{toc_text_truncated}
-```
-
-Найди и верни оглавление в JSON формате."""
-        
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_prompt_template}
-        ]
-        
-        logger.debug(f"[TOC] System message length: {len(system_message)} chars")
-        logger.debug(f"[TOC] User prompt length: {len(user_prompt_template)} chars")
-        
-        try:
-            response = self._make_request(messages, section="TOC Parsing", temperature=0.7)
-            
-            content = response["choices"][0]["message"]["content"]
-            logger.info(f"[TOC] AI response length: {len(content)} chars")
-            logger.debug(f"[TOC] AI response preview: {content[:500]}")
-            
-            # Extract JSON with safe parsing
-            parsed_data = parse_json_safely(content, context="TOC parsing")
-            
-            # Handle both formats: {"toc": [...]} and [...]
-            if isinstance(parsed_data, dict) and "toc" in parsed_data:
-                toc_data = parsed_data["toc"]
-            elif isinstance(parsed_data, list):
-                toc_data = parsed_data
-            else:
-                logger.warning(f"[TOC] Unexpected format from AI: {type(parsed_data)}, content: {content[:200]}")
-                toc_data = []
-            
-            logger.info(f"[TOC] Parsed {len(toc_data)} TOC entries using {self.selected_model}")
-            return toc_data
-            
-        except Exception as e:
-            logger.error(f"[TOC] Failed to parse TOC using {self.selected_model}: {e}")
             return []
     
     def __enter__(self) -> "OpenRouterClient":

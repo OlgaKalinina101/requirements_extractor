@@ -1,598 +1,279 @@
-# 📊 PDF Processing Pipeline - Complete Flow
+# PDF Processing Pipeline
 
-## Вопросы, на которые отвечает этот документ:
-
-1. ✅ **Куда извлекаются изображения?**
-2. ✅ **Как изображения передаются модели?**
-3. ✅ **Как передаются страницы для обработки?**
-4. ✅ **Как считаются обработанные страницы?**
+Описание полного пайплайна обработки PDF-документа — от загрузки до сохранения требований в БД.
 
 ---
 
-## 1. 📥 Извлечение изображений
+## Обзор
 
-### Где и как сохраняются изображения
+Система использует **постраничный подход** (page-by-page): каждая страница обрабатывается независимо батчами по 7 страниц. Это заменило ранее использовавшийся TOC-based подход.
 
-**Путь:** `data/output/{timestamp}/images/`
-
-**Код:** `api_server.py:449-455`
-```python
-config.image_dir = output_dir / "images"
-config.image_dir.mkdir(parents=True, exist_ok=True)
+```
+PDF Upload
+    │
+    ▼
+[1] Сохранение файла + запись в БД
+    │
+    ▼
+[2] Извлечение страниц PDF (ThreadPoolExecutor)
+    │  pages[]                page_image_metadata{}
+    ▼
+[3] AI-обработка страниц батчами
+    │  batch_size=7, asyncio.gather
+    │  Для каждой страницы: текст + изображения
+    ▼
+[4] Сохранение в БД
+    │  Section "All Pages" + bulk INSERT requirements
+    ▼
+[5] Метрики покрытия
+    │
+    ▼
+[6] Word-документ (опционально)
 ```
 
-**Пример:** `data/output/20260222_123456/images/`
+---
 
-### Процесс извлечения
+## Шаг 1: Сохранение файла
 
-**1. PDF → Параллельная обработка страниц**
-
-`pdf_processor.py:204-309` - `extract_pages()`
-
-- Использует `ThreadPoolExecutor` с автоопределением количества потоков
-- Обрабатывает **ВСЕ страницы параллельно** одновременно
-- Каждая страница обрабатывается в отдельном потоке
+**Код:** `src/extraction_service.py` → `_save_file()`
 
 ```python
-with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-    future_to_page = {
-        executor.submit(self._extract_single_page, pdf_path, page_num, image_dir): page_num
+# Сохранить PDF
+pdf_path = UPLOAD_DIR / f"{timestamp}_{filename}"
+open(pdf_path, "wb").write(file_content)
+
+# Создать рабочий каталог для изображений и отчётов
+output_dir = Path(tempfile.mkdtemp(prefix="req_extract_"))
+```
+
+Путь сохранения: `data/uploads/{YYYYMMDD_HHMMSS}_{оригинальное_имя}.pdf`
+
+---
+
+## Шаг 2: Извлечение страниц PDF
+
+**Код:** `src/pdf_processor.py` → `extract_pages()`
+
+Используется `ThreadPoolExecutor` — все страницы обрабатываются параллельно:
+
+```python
+with ThreadPoolExecutor() as executor:
+    futures = {
+        executor.submit(_extract_single_page, pdf_path, page_num, image_dir): page_num
         for page_num in range(total_pages)
     }
 ```
 
-**2. Обработка одной страницы**
-
-`pdf_processor.py:70-203` - `_extract_single_page()`
+Для каждой страницы:
 
 ```python
+# pymupdf4llm → текст в Markdown-формате + изображения на диск
 chunk = pymupdf4llm.to_markdown(
-    str(pdf_path),
+    pdf_path,
     page_chunks=True,
     pages=[page_num],
-    write_images=True,        # ✅ ИЗВЛЕКАТЬ ИЗОБРАЖЕНИЯ
-    image_path=str(image_dir), # ✅ ПУТЬ СОХРАНЕНИЯ
-    dpi=self.config.dpi,       # Качество (обычно 150-300 DPI)
+    write_images=True,
+    image_path=str(image_dir),
+    dpi=150
 )
 ```
 
-**Что извлекается:**
-- ✅ Текст страницы (markdown формат)
-- ✅ Изображения (PNG/JPG файлы)
-- ✅ Метаданные изображений (имя файла, индекс, страница)
-
-### Формат имен файлов изображений
-
-**Исходный формат (pymupdf4llm):**
-```
-{pdf_name}-p{page_num}-img{index}.{ext}
-```
-
-**Переименовывается в:**
-```
-page_{page_1based}_image_{index}.{ext}
-```
-
-**Примеры:**
-```
-doc-p0-img0.png  →  page_1_image_0.png
-doc-p5-img2.jpg  →  page_6_image_2.jpg
-doc-p10-img1.png →  page_11_image_1.png
-```
-
-**Код переименования:** `pdf_processor.py:155-175`
-
-### Метаданные изображений
-
-**Структура:** `Dict[int, List[Dict]]`
-
-**Ключ:** Номер страницы (1-based)
-**Значение:** Список словарей с метаданными
+**Результат:**
 
 ```python
-image_metadata = {
-    1: [],  # Нет изображений на странице 1
-    5: [    # 2 изображения на странице 5
-        {
-            "filename": "page_5_image_0.png",
-            "path": "data/output/.../images/page_5_image_0.png",
-            "page_number": 5,
-            "index": 0
-        },
-        {
-            "filename": "page_5_image_1.png",
-            "path": "data/output/.../images/page_5_image_1.png",
-            "page_number": 5,
-            "index": 1
-        }
+pages = [
+    {"page_number": 1, "text": "# Введение\n..."},
+    {"page_number": 2, "text": "## 1.1 Общие требования\n..."},
+    ...
+]
+
+page_image_metadata = {
+    5: [
+        {"filename": "page_5_image_0.png", "path": ".../images/page_5_image_0.png", "page_number": 5, "index": 0}
     ],
-    10: [   # 1 изображение на странице 10
-        {
-            "filename": "page_10_image_0.png",
-            "path": "data/output/.../images/page_10_image_0.png",
-            "page_number": 10,
-            "index": 0
-        }
+    10: [
+        {"filename": "page_10_image_0.png", ...},
+        {"filename": "page_10_image_1.png", ...}
     ]
 }
 ```
 
+Формат имён изображений: `page_{N}_image_{I}.{ext}` (1-based)
+
 ---
 
-## 2. 🤖 Передача данных к AI модели
+## Шаг 3: AI-обработка страниц
 
-### Как работает обработка секциями
+**Код:** `src/requirements_extractor.py` → `extract_requirements_from_all_pages()`
 
-**Важно:** Документ обрабатывается **ПО СЕКЦИЯМ**, а не по страницам.
-
-**Процесс:**
-
-1. **TOC (Table of Contents)** определяет секции
-2. Каждая секция обрабатывается **отдельным запросом к AI**
-3. Для каждой секции:
-   - Отправляется **текст секции** (может быть 1-50 страниц)
-   - Отправляются **все изображения секции** (по одному)
-
-### Обработка ОДНОЙ секции
-
-**Код:** `api_server.py:651-810`
+### Батчевая обработка
 
 ```python
-for idx, toc_entry in enumerate(extractor.toc_entries):
-    # 1. Получить текст секции (все страницы секции)
-    section_text = extractor.pdf_processor.get_section_text(
-        extractor.pages,
-        toc_entry.page_start,  # Например, страница 10
-        end_page              # Например, страница 33
+for batch_start in range(0, total_pages, batch_size):  # batch_size=7
+    batch = pages[batch_start : batch_start + batch_size]
+    batch_results = await _process_page_batch_simple(batch, image_dir, ...)
+    all_requirements.extend(batch_results)
+```
+
+Внутри батча страницы обрабатываются параллельно через `asyncio.gather`.
+
+### Обработка одной страницы
+
+```python
+async def _process_single_page_simple(page_obj, image_dir, ...):
+    page_number = page_obj["page_number"]
+    page_text = page_obj["text"]
+
+    # 1. Пропустить пустые страницы
+    if not page_text or len(page_text.strip()) < 50:
+        return []
+
+    # 2. Текст → AI (в потоке пула)
+    text_reqs = await loop.run_in_executor(
+        None,
+        ai_client.extract_requirements,
+        "Page", f"Page {page_number}", str(page_number), page_text
     )
-    
-    # 2. Извлечь требования из ТЕКСТА (1 запрос к AI)
-    requirements = extractor.ai_client.extract_requirements(
-        section_text=section_text  # Текст страниц 10-33
-    )
-    
-    # 3. Найти изображения в этой секции
-    section_images = []
-    for page_num in range(10, 33):  # Страницы секции
-        if page_num in extractor.page_image_metadata:
-            section_images.extend(
-                extractor.page_image_metadata[page_num]
-            )
-    
-    # 4. Обработать КАЖДОЕ изображение ОТДЕЛЬНО
-    for img_meta in section_images:
-        img_reqs = extractor.ai_client.extract_requirements_from_image(
-            image_path=Path(img_meta["path"]),
-            page_number=img_meta["page_number"]
-        )
-        image_requirements.extend(img_reqs)
-```
 
-### Схема обработки секции
-
-```
-Секция 2.3 (страницы 10-33)
-│
-├─ Шаг 1: Текст → AI (1 запрос)
-│  └─ Отправляется: весь текст страниц 10-33
-│  └─ Возвращается: список требований из текста
-│
-├─ Шаг 2: Поиск изображений
-│  ├─ Страница 10: 2 изображения
-│  ├─ Страница 12: 1 изображение
-│  └─ Страница 31: 3 изображения
-│
-└─ Шаг 3: Каждое изображение → AI (N запросов)
-   ├─ page_10_image_0.png → AI → требования
-   ├─ page_10_image_1.png → AI → требования
-   ├─ page_12_image_0.png → AI → требования
-   ├─ page_31_image_0.png → AI → требования
-   ├─ page_31_image_1.png → AI → требования
-   └─ page_31_image_2.png → AI → требования
-```
-
-**Итого для секции:**
-- **1 запрос** для текста (весь текст секции)
-- **6 запросов** для изображений (по одному на изображение)
-- **Всего: 7 запросов к AI**
-
-### Как изображение передается к AI
-
-**Код:** `openrouter_client.py:384-533` - `extract_requirements_from_image()`
-
-**1. Кодирование изображения в Base64**
-
-```python
-def _encode_image(self, image_path: Path) -> str:
-    with open(image_path, "rb") as f:
-        image_bytes = f.read()
-    base64_image = base64.b64encode(image_bytes).decode('utf-8')
-    
-    # Определить MIME тип
-    ext = image_path.suffix.lower()
-    mime_type = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-    }.get(ext, 'image/png')
-    
-    # Data URI
-    return f"data:{mime_type};base64,{base64_image}"
-```
-
-**2. Формирование запроса**
-
-```python
-messages = [
-    {"role": "system", "content": "Ты — эксперт по извлечению требований..."},
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "text",
-                "text": f"Раздел: {section_number} {section_title}\nСтраница: {page_number}"
-            },
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": "data:image/png;base64,iVBORw0KGgoAAAANS..."
-                }
-            }
+    # 3. Изображения → AI (параллельно)
+    if image_dir and page_number in page_image_metadata:
+        image_tasks = [
+            _async_extract_from_image_simple(Path(img["path"]), page_number)
+            for img in page_image_metadata[page_number]
+            if Path(img["path"]).exists()
         ]
-    }
-]
+        image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
+
+    return text_reqs + image_reqs
 ```
 
-**3. Отправка к OpenRouter API**
+### Запрос к OpenRouter (текст)
+
+**Код:** `src/openrouter_client.py` → `extract_requirements()`
 
 ```python
-response = requests.post(
-    "https://openrouter.ai/api/v1/chat/completions",
-    headers={
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    },
-    json={
-        "model": "anthropic/claude-3.7-sonnet:beta",
-        "messages": messages,
-        "temperature": 0.7
-    }
-)
+POST https://openrouter.ai/api/v1/chat/completions
+Authorization: Bearer {api_key}
+
+{
+  "model": "anthropic/claude-sonnet-4-5",
+  "messages": [
+    {"role": "system", "content": "<system_prompt из prompts.yaml>"},
+    {"role": "user", "content": "Раздел: Page\nСтраница: 15\n\n<текст страницы>"}
+  ]
+}
 ```
 
-**Формат ответа AI:**
-```json
+Ответ AI парсится из JSON-массива с retry-логикой (до 3 попыток, экспоненциальный backoff: 1с, 2с, 4с).
+
+### Запрос к OpenRouter (изображение)
+
+```python
 {
-  "requirements": [
+  "model": "anthropic/claude-sonnet-4-5",
+  "messages": [
+    {"role": "system", "content": "<system_prompt>"},
     {
-      "id": "REQ-23-IMG-001",
-      "text": "Насос должен иметь максимальную производительность 150 м³/ч",
-      "type": "Техническое",
-      "priority": "Обязательно"
-    },
-    {
-      "id": "REQ-23-IMG-002",
-      "text": "Давление на выходе не менее 6 бар",
-      "type": "Техническое",
-      "priority": "Обязательно"
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Страница: 10"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+      ]
     }
   ]
 }
 ```
 
+### Структура извлечённого требования
+
+```json
+{
+  "id": "REQ-15-001",
+  "text": "Насос должен обеспечивать производительность не менее 150 м³/ч",
+  "type": "technical",
+  "priority": "mandatory",
+  "source_page": 15,
+  "source_type": "text"
+}
+```
+
 ---
 
-## 3. 📄 Обработка страниц секциями
+## Шаг 4: Сохранение в БД
 
-### Как определяются секции
-
-**Метод 1: TOC из PDF (AI парсинг)**
-
-`api_server.py:556-603`
-
-1. Берутся **первые 10 страниц** документа
-2. Отправляются к AI для парсинга оглавления
-3. AI возвращает список секций с номерами страниц
+**Код:** `src/extraction_service.py` → `_save_to_db()`
 
 ```python
-toc_text = "\n\n".join(extractor.pages[:10])
-toc_entries = extractor.ai_client.parse_table_of_contents(toc_text)
-```
+# Создать одну секцию для всего документа
+section = crud.create_section(
+    document_id=db_document.id,
+    section_number="1",
+    title="All Pages",
+    page_start=1,
+    page_end=len(pages)
+)
 
-**Пример TOC:**
-```python
-[
-    TableOfContentsEntry(
-        number="2.3",
-        title="Технические требования к насосам",
-        page_start=10,
-        level=2
-    ),
-    TableOfContentsEntry(
-        number="2.3.1",
-        title="Основные параметры",
-        page_start=12,
-        level=3
-    ),
-    TableOfContentsEntry(
-        number="3",
-        title="Требования к электрооборудованию",
-        page_start=33,
-        level=1
-    ),
-]
-```
-
-**Метод 2: Автоматические секции (fallback)**
-
-`api_server.py:609-626`
-
-Если TOC не парсится:
-- Документ делится на секции по ~20 страниц
-- Секции нумеруются автоматически
-
-```python
-sections_per_doc = max(1, total_pages // 20)
-for i in range(0, total_pages, sections_per_doc):
-    manual_toc.append({
-        "number": str(section_num),
-        "title": f"Раздел {section_num} (стр. {i+1}-{min(i+sections_per_doc, total_pages)})",
-        "page_start": i + 1
-    })
-```
-
-### Как секция связывается со страницами
-
-**Код:** `api_server.py:664-689`
-
-```python
-# Определить диапазон страниц секции
-start_page = toc_entry.page_start  # 10
-end_page = None
-
-# Найти следующую секцию
-for next_entry in extractor.toc_entries[idx+1:]:
-    if next_entry.page_start > toc_entry.page_start:
-        end_page = next_entry.page_start  # 33
-        break
-
-# Если нет следующей секции — до конца документа
-if end_page is None:
-    end_page = len(extractor.pages) + 1
-
-# Получить текст секции (страницы 10-32)
-section_text = extractor.pdf_processor.get_section_text(
-    extractor.pages,
-    start_page=10,
-    end_page=33  # Не включается (range)
+# Bulk INSERT всех требований
+saved_count = crud.bulk_create_requirements(
+    document_id=db_document.id,
+    section_id=section.id,
+    requirements=all_requirements
 )
 ```
 
-**`get_section_text()` - `pdf_processor.py:311-340`**
-
-```python
-def get_section_text(self, pages: List[str], start_page: int, end_page: int = None) -> str:
-    if end_page is None:
-        end_page = len(pages) + 1
-    
-    # 1-indexed → 0-indexed
-    start_idx = start_page - 1  # 10 → 9
-    end_idx = end_page - 1       # 33 → 32
-    
-    # Объединить страницы
-    section_pages = pages[start_idx:end_idx]  # pages[9:32] = 23 страницы
-    return "\n\n".join(section_pages)
-```
-
-### Пример полного цикла
-
-**Документ: 225 страниц, 5 секций**
-
-```
-Секция 1: "Введение" (стр. 1-9)
-├─ Текст: 9 страниц → AI (1 запрос)
-└─ Изображения: 0
-
-Секция 2: "Общие требования" (стр. 10-32)
-├─ Текст: 23 страницы → AI (1 запрос)
-└─ Изображения: 5 (на стр. 10, 12, 31)
-   ├─ page_10_image_0.png → AI
-   ├─ page_10_image_1.png → AI
-   ├─ page_12_image_0.png → AI
-   ├─ page_31_image_0.png → AI
-   └─ page_31_image_1.png → AI
-
-Секция 3: "Технические требования" (стр. 33-180)
-├─ Текст: 148 страниц → AI (1 запрос)
-└─ Изображения: 199 (на разных страницах)
-   └─ 199 запросов к AI
-
-Секция 4: "Приложения" (стр. 181-220)
-├─ Текст: 40 страниц → AI (1 запрос)
-└─ Изображения: 15
-   └─ 15 запросов к AI
-
-Секция 5: "Справочная информация" (стр. 221-225)
-├─ Текст: 5 страниц → AI (1 запрос)
-└─ Изображения: 0
-
-ИТОГО:
-- Текстовых запросов: 5
-- Запросов изображений: 219
-- ВСЕГО: 224 запроса к AI
-```
+Используется `Session.execute(insert(Requirement), [...])` — один SQL-запрос для всех требований.
 
 ---
 
-## 4. 📊 Подсчет обработанных страниц
+## Шаг 5: Метрики покрытия
 
-### Как считаются обработанные страницы
-
-**Код:** `api_server.py:872-893`
+**Код:** `src/extraction_service.py` → `_save_coverage_metrics()`
 
 ```python
-# Найти страницы, у которых есть требования
-pages_with_requirements = set()
-for section in extractor.registry.sections:
-    for req in section.requirements:
-        if req.page_number:
-            pages_with_requirements.add(req.page_number)
-
-# Все страницы документа
-all_pages = set(range(1, len(extractor.pages) + 1))
-
-# Вычислить пропущенные
-skipped_pages = sorted(list(all_pages - pages_with_requirements))
-processed_pages = len(pages_with_requirements)
+pages_with_reqs = {r.source_page for r in all_requirements if r.source_page}
+processed_pages = len(pages_with_reqs)
+skipped_pages = sorted(set(range(1, total_pages + 1)) - pages_with_reqs)
+coverage_pct = processed_pages / total_pages * 100
 ```
 
 **Логика:**
-- **Обработанная страница** = страница, на которой найдено **хотя бы одно требование**
-- **Пропущенная страница** = страница **без требований**
-
-### Пример подсчета
-
-**Документ: 225 страниц**
-
-```python
-# Требования найдены на страницах:
-pages_with_requirements = {10, 11, 12, 31, 32, 33, 34, ...}
-# 23 уникальные страницы
-
-# Все страницы:
-all_pages = {1, 2, 3, 4, 5, ..., 225}
-# 225 страниц
-
-# Пропущенные:
-skipped_pages = [1, 2, 3, 4, 5, 6, 7, 8, 9, 13, 14, ..., 224, 225]
-# 202 страницы
-
-# Метрики:
-processed_pages = 23
-coverage_percent = (23 / 225) * 100 = 10.2%
-```
-
-### Сохранение в БД
-
-```python
-crud.create_or_update_coverage_metrics(
-    db=db,
-    document_id=db_document.id,
-    total_pages=225,
-    processed_pages=23,           # ✅ Страницы с требованиями
-    skipped_pages=[1, 2, 3, ...], # ✅ Страницы без требований
-    requirements_count=662,
-    requirements_by_type={
-        "Техническое": 245,
-        "Функциональное": 189,
-        ...
-    }
-)
-```
-
-### Почему страницы пропускаются
-
-**Нормальные причины:**
-1. **Титульные страницы** (1-5) — нет требований
-2. **Оглавление** (6-9) — только навигация
-3. **Пустые/технические страницы** — разделители
-4. **Справочные приложения** — таблицы, схемы без текста
-
-**Ненормальные причины:**
-1. AI не смог распознать требования
-2. Страница содержит только изображение (без текста)
-3. Ошибка обработки
+- **Обработанная страница** = страница, на которой найдено хотя бы одно требование
+- **Пропущенная страница** = страница без требований (нормально для титульных, оглавления и т.д.)
 
 ---
 
-## 5. 🔄 Полный Pipeline
+## Шаг 6: Экспорт Word (опционально)
 
-```
-1. UPLOAD
-   └─ Файл сохранен в data/uploads/
+**Код:** `src/word_exporter.py` → `generate_word_document()`
 
-2. EXTRACT PDF (параллельно)
-   ├─ Страница 1 (поток 1) → текст + изображения
-   ├─ Страница 2 (поток 2) → текст + изображения
-   ├─ ...
-   └─ Страница 225 (поток N) → текст + изображения
-   └─ Результат: pages[], image_metadata{}
-
-3. PARSE TOC
-   ├─ AI парсит первые 10 страниц
-   └─ Возвращает секции с номерами страниц
-
-4. EXTRACT REQUIREMENTS (по секциям)
-   ├─ Секция 1 (стр. 1-9)
-   │  ├─ Текст → AI → требования (текст)
-   │  └─ Изображения: нет
-   │
-   ├─ Секция 2 (стр. 10-32)
-   │  ├─ Текст → AI → требования (текст)
-   │  └─ Изображения:
-   │     ├─ page_10_image_0.png → AI → требования (изображение)
-   │     ├─ page_10_image_1.png → AI → требования (изображение)
-   │     └─ ...
-   │
-   └─ Секция N
-      └─ ...
-
-5. SAVE TO DATABASE
-   ├─ Документ (filename, total_pages, status)
-   ├─ Секции (section_number, title, page_start)
-   ├─ Требования (text, type, priority, page_number, source_type)
-   └─ Метрики (processed_pages, skipped_pages, coverage_percent)
-
-6. GENERATE REPORTS
-   ├─ JSON registry
-   └─ Word document (optional)
-```
+Word-документ генерируется из объектов в памяти сразу после AI-обработки. При запросе экспорта через API (`GET /api/documents/{id}/export/word`) используется `generate_word_from_db()` — строит документ из данных БД.
 
 ---
 
-## 6. 📈 Статистика запросов
+## Статистика запросов
 
-### Типичный документ (225 страниц, 5 секций)
+### Типичный документ (50 страниц)
 
-**AI запросы:**
-- TOC парсинг: **1 запрос**
-- Текстовая обработка секций: **5 запросов** (по одному на секцию)
-- Обработка изображений: **219 запросов** (по одному на изображение)
-- **ИТОГО: 225 запросов к AI**
+| Тип запроса | Количество | Примечание |
+|---|---|---|
+| Текстовых AI-запросов | ≤ 50 | По одному на непустую страницу |
+| Запросов по изображениям | 0–50 | Зависит от содержимого |
+| Батчей (по 7 страниц) | ~8 | `ceil(50/7)` |
 
-**Стоимость (Claude Sonnet 3.7):**
-- Вход: ~$3/1M токенов
-- Выход: ~$15/1M токенов
-- Среднее: ~200K входных, ~50K выходных токенов
-- **Стоимость: $0.60-$1.50** за документ
+### Стоимость (Claude Sonnet)
 
-**Время обработки:**
-- PDF extraction (параллельно): **1-2 минуты**
-- AI обработка: **10-20 минут** (зависит от скорости API)
-- **ИТОГО: 15-25 минут**
+- Вход: ~$3/M токенов, выход: ~$15/M токенов
+- Среднее на 50-страничный документ: **$0.15–$0.50**
+- Время обработки: **3–10 минут** (зависит от скорости API)
 
 ---
 
-## 7. 💡 Ключевые выводы
+## Обработка ошибок
 
-### ✅ Что важно понять:
-
-1. **Изображения извлекаются СРАЗУ** при обработке PDF (все страницы параллельно)
-2. **Изображения сохраняются** в `data/output/{timestamp}/images/`
-3. **Обработка идет ПО СЕКЦИЯМ**, а не по страницам
-4. **Каждое изображение** отправляется к AI **отдельным запросом**
-5. **Текст секции** (может быть 1-50 страниц) отправляется **одним запросом**
-6. **Обработанная страница** = страница с хотя бы одним требованием
-7. **Пропущенные страницы** = страницы без требований (это нормально!)
-
-### 🎯 Оптимизации:
-
-**Текущее решение оптимально для:**
-- Точности извлечения (каждое изображение анализируется отдельно)
-- Отслеживания прогресса (по секциям)
-- Параллельности (PDF extraction многопоточный)
-
-**Возможные улучшения:**
-- Batch обработка изображений (несколько изображений в одном запросе)
-- Кэширование результатов AI
-- Предварительная фильтрация изображений (пропуск декоративных)
+| Ситуация | Поведение |
+|---|---|
+| Пустая/короткая страница (< 50 символов) | Страница пропускается, в лог идёт `debug` |
+| Ошибка AI на одной странице | `asyncio.gather` возвращает `Exception`, страница пропускается с `logger.error` |
+| Ошибка парсинга JSON от AI | До 3 retry с экспоненциальным backoff; если все неудачны — возвращается `[]` |
+| Ошибка записи в БД | Логируется `exc_info=True`; `total_requirements_saved = len(all_requirements)` как fallback |
+| Ошибка генерации Word | Логируется warning; результат возвращается без Word-файла |

@@ -187,12 +187,16 @@ const statusOptions = [
 ]
 
 const typeOptions = [
-  { title: 'Техническое', value: 'Техническое' },
-  { title: 'Функциональное', value: 'Функциональное' },
-  { title: 'Организационное', value: 'Организационное' },
-  { title: 'Документационное', value: 'Документационное' },
-  { title: 'Нефункциональное', value: 'Нефункциональное' },
-  { title: 'Прочее', value: 'Прочее' }
+  { title: 'Техническое', value: 'Technical' },
+  { title: 'Функциональное', value: 'Functional' },
+  { title: 'Производительность', value: 'Performance' },
+  { title: 'Безопасность', value: 'Safety' },
+  { title: 'Документационное', value: 'Documentation' },
+  { title: 'Интерфейс', value: 'Interface' },
+  { title: 'Ограничение', value: 'Constraint' },
+  { title: 'Процесс', value: 'Process' },
+  { title: 'Поставка', value: 'Supply' },
+  { title: 'Неизвестно', value: 'Unknown' }
 ]
 
 const updateFilters = () => {
@@ -205,24 +209,24 @@ const updateFilters = () => {
 const handleAccept = async (requirementId) => {
   try {
     await requirementsStore.acceptRequirement(requirementId)
-  } catch (error) {
-    console.error('Failed to accept requirement:', error)
+  } catch {
+    // store handles error state
   }
 }
 
 const handleReject = async (requirementId, reason) => {
   try {
     await requirementsStore.rejectRequirement(requirementId, reason)
-  } catch (error) {
-    console.error('Failed to reject requirement:', error)
+  } catch {
+    // store handles error state
   }
 }
 
 const handleEdit = async (requirementId, editedText, reason) => {
   try {
     await requirementsStore.editRequirement(requirementId, editedText, reason)
-  } catch (error) {
-    console.error('Failed to edit requirement:', error)
+  } catch {
+    // store handles error state
   }
 }
 
@@ -237,9 +241,7 @@ const onPdfPageChanged = (page) => {
   currentPdfPage.value = page
 }
 
-const onPdfLoaded = () => {
-  console.log('PDF loaded')
-}
+const onPdfLoaded = () => {}
 
 const loadData = async () => {
   const documentId = route.params.documentId
@@ -251,12 +253,10 @@ const loadData = async () => {
       // Jump to first requirement's page after loading
       const firstRequirement = requirementsStore.filteredRequirements[0]
       if (firstRequirement && firstRequirement.page_number) {
-        console.log(`📄 Jumping to first requirement's page: ${firstRequirement.page_number}`)
         currentPdfPage.value = firstRequirement.page_number
-        // PDF viewer will use this initial page when it loads
       }
-    } catch (error) {
-      console.error('Failed to load data:', error)
+    } catch {
+      // stores handle error state
     }
   }
 }

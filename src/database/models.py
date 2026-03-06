@@ -133,6 +133,7 @@ class Requirement(Base):
     priority = Column(String(50), nullable=True)  # Temporarily VARCHAR instead of ENUM
     page_number = Column(Integer, nullable=True)
     bbox = Column(JSON, nullable=True)  # Bounding box: {"x": 0, "y": 0, "width": 100, "height": 50}
+    subitems = Column(JSON, nullable=True)  # List items if requirement is grouped
     
     # Review fields
     status = Column(String(50), default="pending", nullable=False, index=True)

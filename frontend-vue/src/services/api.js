@@ -91,6 +91,14 @@ export const requirementsApi = {
   }
 }
 
+// Export URLs (use as href for download links)
+export const exportUrls = {
+  word: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/word`,
+  json: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/json`,
+  txt: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/txt`,
+  pdf: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/pdf`,
+}
+
 // WebSocket connection for real-time updates
 // Use relative WebSocket URL to connect through the same host
 export const createWebSocket = () => {

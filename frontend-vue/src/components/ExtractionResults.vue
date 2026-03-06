@@ -83,7 +83,7 @@
 
       <v-list density="compact">
         <v-list-item
-          :href="`/api/documents/${results.document_id}/export/word`"
+          :href="wordUrl"
           target="_blank"
           class="download-item"
         >
@@ -106,7 +106,7 @@
         </v-list-item>
 
         <v-list-item
-          :href="`/api/documents/${results.document_id}/export/json`"
+          :href="jsonUrl"
           target="_blank"
           class="download-item"
         >
@@ -129,7 +129,7 @@
         </v-list-item>
 
         <v-list-item
-          :href="`/api/documents/${results.document_id}/export/txt`"
+          :href="txtUrl"
           target="_blank"
           class="download-item"
         >
@@ -188,6 +188,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { exportUrls } from '@/services/api'
 
 const props = defineProps({
   results: {
@@ -198,11 +199,8 @@ const props = defineProps({
 
 defineEmits(['view-requirements', 'close'])
 
-const formatNumber = (num) => {
-  return num.toLocaleString()
-}
+const formatNumber = (num) => num.toLocaleString()
 
-// Map model IDs to display names
 const modelDisplayNames = {
   'claude-sonnet-4.5': 'Claude Sonnet 4.5',
   'claude-opus-4.6': 'Claude Opus 4.6',
@@ -212,11 +210,13 @@ const modelDisplayNames = {
 }
 
 const displayModelName = computed(() => {
-  if (!props.results || !props.results.model_used) {
-    return 'Unknown'
-  }
+  if (!props.results?.model_used) return 'Unknown'
   return modelDisplayNames[props.results.model_used] || props.results.model_used
 })
+
+const wordUrl = computed(() => props.results?.document_id ? exportUrls.word(props.results.document_id) : null)
+const jsonUrl = computed(() => props.results?.document_id ? exportUrls.json(props.results.document_id) : null)
+const txtUrl = computed(() => props.results?.document_id ? exportUrls.txt(props.results.document_id) : null)
 </script>
 
 <style scoped>

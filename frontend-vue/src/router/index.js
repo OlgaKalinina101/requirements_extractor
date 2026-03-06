@@ -3,6 +3,9 @@ import ProjectsView from '../views/ProjectsView.vue'
 import ProjectView from '../views/ProjectView.vue'
 import HomeView from '../views/HomeView.vue'
 import ReviewView from '../views/ReviewView.vue'
+import AdminView from '../views/AdminView.vue'
+import RequirementDetailView from '../views/RequirementDetailView.vue'
+import DashboardView from '../views/DashboardView.vue'
 
 const routes = [
   {
@@ -26,6 +29,22 @@ const routes = [
     name: 'review',
     component: ReviewView,
     props: true
+  },
+  {
+    path: '/admin',
+    name: 'admin',
+    component: AdminView
+  },
+  {
+    path: '/requirement/:requirementId',
+    name: 'requirement-detail',
+    component: RequirementDetailView,
+    props: true
+  },
+  {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: DashboardView
   }
 ]
 

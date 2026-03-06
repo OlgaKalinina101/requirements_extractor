@@ -12,7 +12,7 @@ from typing import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import QueuePool
 
 from src.database.models import Base
 
@@ -31,11 +31,13 @@ elif _raw_url.startswith("postgresql+psycopg2://"):
 else:
     DATABASE_URL = _raw_url
 
-# Create engine
-# Use NullPool for development to avoid connection issues
+# Create engine with connection pool
 engine = create_engine(
     DATABASE_URL,
-    poolclass=NullPool,
+    poolclass=QueuePool,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,  # Verify connections before use
     echo=False,  # Set to True for SQL query logging
 )
 

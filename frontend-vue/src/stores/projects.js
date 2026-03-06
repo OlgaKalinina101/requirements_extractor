@@ -18,7 +18,6 @@ export const useProjectsStore = defineStore('projects', {
         this.projects = response.data.projects || []
       } catch (error) {
         this.error = error.message
-        console.error('Failed to fetch projects:', error)
       } finally {
         this.loading = false
       }
@@ -33,7 +32,6 @@ export const useProjectsStore = defineStore('projects', {
         return response.data
       } catch (error) {
         this.error = error.message
-        console.error('Failed to fetch project:', error)
         throw error
       } finally {
         this.loading = false

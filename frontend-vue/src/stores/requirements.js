@@ -57,7 +57,6 @@ export const useRequirementsStore = defineStore('requirements', {
         return this.requirements
       } catch (error) {
         this.error = error.message
-        console.error('Failed to fetch requirements:', error)
         throw error
       } finally {
         this.loading = false
@@ -73,7 +72,6 @@ export const useRequirementsStore = defineStore('requirements', {
         return response.data
       } catch (error) {
         this.error = error.message
-        console.error('Failed to fetch requirement:', error)
         throw error
       } finally {
         this.loading = false

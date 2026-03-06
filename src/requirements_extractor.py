@@ -14,7 +14,7 @@ from datetime import datetime
 # Import OpenRouter client (primary)
 from .openrouter_client import OpenRouterClient, get_available_models
 # DeepSeek imported only if explicitly needed (legacy mode)
-from .models import Section, RequirementsRegistry, Requirement, TableOfContentsEntry
+from .models import RequirementsRegistry, Requirement, TableOfContentsEntry
 from .config import ApplicationConfig
 from .logger import get_logger
 
@@ -33,8 +33,6 @@ class RequirementsExtractor:
         self.config = config
         self.registry = RequirementsRegistry()
         self.pages: List[str] = []
-        self.toc_entries: List[TableOfContentsEntry] = []
-        self.current_section: Optional[str] = None
         
         # Initialize PDF processor
         from .pdf_processor import PDFProcessor
@@ -48,42 +46,6 @@ class RequirementsExtractor:
         self.page_image_metadata: Dict[int, List[Dict]] = {}  # page_number -> list of image metadata
         
         logger.info(f"Requirements extractor initialized with {self.ai_provider}")
-    
-    def parse_table_of_contents(self, manual_toc: List[Dict[str, Any]] = None) -> None:
-        """Parse table of contents from extracted pages or manual entries.
-        
-        Args:
-            manual_toc: Manual TOC entries if automatic parsing fails
-        """
-        if manual_toc:
-            logger.info("Using manual TOC entries")
-            self.toc_entries = [
-                TableOfContentsEntry(
-                    level=entry["level"],
-                    number=entry["number"],
-                    title=entry["title"],
-                    page_start=entry["page_start"]
-                )
-                for entry in manual_toc
-                if entry.get("number") and entry.get("title")
-            ]
-        else:
-            # For now, create default sections every 20 pages
-            logger.info("Creating default TOC entries every 20 pages")
-            total_pages = len(self.pages)
-            sections_per_doc = max(1, total_pages // 20)  # ~20 pages per section
-            
-            self.toc_entries = []
-            for i in range(0, total_pages, sections_per_doc):
-                section_num = len(self.toc_entries) + 1
-                self.toc_entries.append(TableOfContentsEntry(
-                    level=1,
-                    number=str(section_num),
-                    title=f"Раздел {section_num} (стр. {i+1}-{min(i+sections_per_doc, total_pages)})",
-                    page_start=i + 1
-                ))
-            
-            logger.info(f"Created {len(self.toc_entries)} default TOC entries")
     
     def setup_ai_client(self, model_id: str = None) -> None:
         """Set up AI client with specified model.
@@ -119,143 +81,222 @@ class RequirementsExtractor:
                 "Supported providers: 'openrouter' (recommended) or 'deepseek' (legacy)"
             )
     
-    def extract_requirements_from_images(
-        self,
-        toc_entry: TableOfContentsEntry,
-        image_dir: Path
-    ) -> List[Requirement]:
-        """Extract requirements from images in a section.
+    async def extract_requirements_from_all_pages(self, image_dir: Optional[Path] = None, batch_size: int = 7, progress_callback=None) -> List[Requirement]:
+        """Extract requirements from ALL pages directly without TOC parsing.
+        
+        This is a simplified, faster approach that processes all pages in batches
+        without needing to parse the table of contents first.
         
         Args:
-            toc_entry: Table of contents entry for the section
-            image_dir: Directory containing extracted images
-            
-        Returns:
-            List of Requirement objects extracted from images
-        """
-        if not self.ai_client:
-            return []
-        
-        # Find end page
-        end_page = None
-        start_page = toc_entry.page_start
-        for next_entry in self.toc_entries:
-            if next_entry.page_start > start_page:
-                end_page = next_entry.page_start
-                break
-        
-        all_image_requirements = []
-        
-        # Process images for pages in this section
-        for page_num in range(start_page, end_page or len(self.pages) + 1):
-            if page_num in self.page_image_metadata:
-                images = self.page_image_metadata[page_num]
-                
-                for img_meta in images:
-                    image_path = Path(img_meta["path"])
-                    
-                    if not image_path.exists():
-                        logger.warning(f"Image file not found: {image_path}")
-                        continue
-                    
-                    logger.info(f"Extracting requirements from image: {image_path.name} (page {page_num})")
-                    
-                    # Extract requirements from this image
-                    if hasattr(self.ai_client, 'extract_requirements_from_image'):
-                        # OpenRouter client with image support
-                        image_requirements = self.ai_client.extract_requirements_from_image(
-                            image_path=image_path,
-                            page_number=page_num,
-                            section_number=toc_entry.number,
-                            section_title=toc_entry.title
-                        )
-                        all_image_requirements.extend(image_requirements)
-                    else:
-                        # DeepSeek client doesn't support images yet
-                        logger.debug(f"Skipping image extraction - client doesn't support images")
-        
-        logger.info(f"Extracted {len(all_image_requirements)} requirements from images in section {toc_entry.number}")
-        return all_image_requirements
-    
-    def extract_requirements_from_section(self, toc_entry: TableOfContentsEntry, image_dir: Optional[Path] = None) -> Section:
-        """Extract requirements from a specific section using AI (text + images).
-        
-        Args:
-            toc_entry: Table of contents entry for the section
             image_dir: Directory containing extracted images (optional)
+            batch_size: Number of pages to process in parallel (default: 7)
+            progress_callback: Callback function(page_num, total_pages, message) for progress updates
             
         Returns:
-            Section object with extracted requirements from both text and images
+            List of all extracted requirements
         """
         if not self.ai_client:
             raise RuntimeError("AI client not configured. Call setup_ai_client() first.")
         
-        # Find end page
-        end_page = None
-        start_page = toc_entry.page_start
-        for next_entry in self.toc_entries:
-            if next_entry.page_start > start_page:
-                end_page = next_entry.page_start
-                break
+        # IMPORTANT: self.pages now contains dicts with structure: {page_number: int, text: str}
+        total_pages = len(self.pages)
+        logger.info(f"[EXTRACT] Processing {total_pages} pages in batches of {batch_size} (no TOC)")
         
-        # Get section text
-        if hasattr(self, 'pdf_processor'):
-            section_text = self.pdf_processor.get_section_text(
-                self.pages, 
-                start_page,
-                end_page
-            )
-        else:
-            # Fallback: manual extraction
-            start_idx = start_page - 1
-            if end_page:
-                end_idx = end_page - 1
-            else:
-                end_idx = len(self.pages)
+        all_requirements = []
+        
+        # Process all pages in batches using their EXPLICIT page numbers
+        for batch_start_idx in range(0, total_pages, batch_size):
+            batch_end_idx = min(batch_start_idx + batch_size, total_pages)
+            # Get page objects for this batch (not indices!)
+            batch_page_objects = self.pages[batch_start_idx:batch_end_idx]
             
-            section_pages = self.pages[start_idx:end_idx]
-            section_text = "\n\n".join(section_pages)
+            # Extract page numbers for logging
+            page_numbers = [p["page_number"] for p in batch_page_objects]
+            logger.info(f"[EXTRACT] Processing batch: pages {page_numbers[0]}-{page_numbers[-1]} ({len(batch_page_objects)} pages)")
+            
+            # Process pages in this batch concurrently
+            batch_requirements = await self._process_page_batch_simple(
+                batch_page_objects,  # Pass page objects with explicit page_number
+                image_dir,
+                progress_callback,
+                total_pages
+            )
+            
+            all_requirements.extend(batch_requirements)
+            logger.info(f"[EXTRACT] Batch complete: {len(batch_requirements)} requirements, total: {len(all_requirements)}")
+        
+        logger.info(f"[EXTRACT] All pages processed: extracted {len(all_requirements)} total requirements")
+        return all_requirements
+    
+    async def _process_page_batch_simple(
+        self,
+        page_objects: List[Dict],  # CHANGED: now list of {page_number: int, text: str}
+        image_dir: Optional[Path],
+        progress_callback,
+        total_pages: int
+    ) -> List[Requirement]:
+        """Process a batch of pages concurrently (simplified version without TOC).
+        
+        Args:
+            page_objects: List of page dicts with {page_number: int, text: str}
+            image_dir: Directory containing extracted images
+            progress_callback: Progress callback function
+            total_pages: Total pages in document for progress calculation
+            
+        Returns:
+            List of requirements extracted from all pages in batch
+        """
+        import asyncio
+        
+        tasks = []
+        for page_obj in page_objects:
+            task = self._process_single_page_simple(
+                page_obj,  # Pass page object with explicit page_number
+                image_dir,
+                progress_callback,
+                total_pages
+            )
+            tasks.append(task)
+        
+        # Run all tasks concurrently
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Flatten results and filter out errors
+        all_requirements = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"Error processing page: {result}")
+            elif isinstance(result, list):
+                all_requirements.extend(result)
+        
+        return all_requirements
+    
+    async def _process_single_page_simple(
+        self,
+        page_obj: Dict,  # CHANGED: now {page_number: int, text: str}
+        image_dir: Optional[Path],
+        progress_callback,
+        total_pages: int
+    ) -> List[Requirement]:
+        """Process a single page: extract text and image requirements (simplified version).
+        
+        Args:
+            page_obj: Page dict with {page_number: int (1-based physical page), text: str}
+            image_dir: Directory containing extracted images
+            progress_callback: Progress callback function
+            total_pages: Total pages for progress calculation
+            
+        Returns:
+            List of requirements extracted from this page
+        """
+        import asyncio
+        
+        # Extract physical page number (1-based, guaranteed correct!)
+        page_number = page_obj["page_number"]
+        page_text = page_obj["text"]
+        
+        if not page_text or len(page_text.strip()) < 50:
+            logger.debug(f"Page {page_number}: skipping (empty or too short)")
+            if progress_callback:
+                progress_callback(page_number, total_pages, f"Page {page_number} skipped (empty)")
+            return []
+        
+        logger.info(f"[PAGE {page_number}] Extracting from text ({len(page_text)} chars)")
         
         # Extract requirements from text
-        text_requirements = self.ai_client.extract_requirements(
-            section_number=toc_entry.number,
-            section_title=toc_entry.title,
-            page_range=f"{start_page}-{end_page-1 if end_page else 'end'}",
-            section_text=section_text
+        text_requirements = await self._async_extract_from_text_simple(
+            page_number,  # Physical page number (1-based, correct!)
+            page_text
         )
         
-        # Set source page for each text requirement
-        for req in text_requirements:
-            req.source_page = start_page
-            req.section_number = toc_entry.number
+        # Extract requirements from images on this page (PARALLEL)
+        image_requirements = []
+        # NOTE: image_metadata uses 1-based page numbers as keys
+        if image_dir and page_number in self.page_image_metadata:
+            images = self.page_image_metadata[page_number]
+            if images:
+                image_tasks = [
+                    self._async_extract_from_image_simple(
+                        Path(img_meta["path"]),
+                        page_number  # Physical page number (1-based)
+                    )
+                    for img_meta in images
+                    if Path(img_meta["path"]).exists()
+                ]
+                if image_tasks:
+                    image_results = await asyncio.gather(*image_tasks, return_exceptions=True)
+                    for result in image_results:
+                        if isinstance(result, Exception):
+                            logger.error(f"Error extracting from image on page {page_number}: {result}")
+                        elif isinstance(result, list):
+                            image_requirements.extend(result)
+        
+        if progress_callback:
+            progress_callback(page_number, total_pages, f"Page {page_number}: {len(text_requirements)} text + {len(image_requirements)} image requirements")
+        
+        logger.info(f"Page {page_number}: extracted {len(text_requirements)} text + {len(image_requirements)} image requirements")
+        
+        return text_requirements + image_requirements
+    
+    async def _async_extract_from_text_simple(
+        self,
+        page_num: int,
+        page_text: str
+    ) -> List[Requirement]:
+        """Async wrapper for text extraction (simplified version without TOC context)."""
+        import asyncio
+        
+        logger.info(f"[TEXT_EXTRACT] page_num={page_num} - CALLING AI for text extraction")
+        
+        # Run sync AI client call in thread pool
+        loop = asyncio.get_running_loop()
+        requirements = await loop.run_in_executor(
+            None,
+            self.ai_client.extract_requirements,
+            "Page",  # section_number (generic)
+            f"Page {page_num}",  # section_title
+            str(page_num),  # page_range
+            page_text
+        )
+        
+        logger.debug(f"[TEXT_EXTRACT] page_num={page_num} - AI returned {len(requirements)} requirements")
+        
+        for req in requirements:
+            req.source_page = page_num
+            req.section_number = None
             req.source_type = "text"
         
-        # Extract requirements from images if available
-        image_requirements = []
-        if image_dir and self.page_image_metadata:
-            image_requirements = self.extract_requirements_from_images(toc_entry, image_dir)
+        return requirements
+    
+    async def _async_extract_from_image_simple(
+        self,
+        image_path: Path,
+        page_num: int
+    ) -> List[Requirement]:
+        """Async wrapper for image extraction (simplified version)."""
+        import asyncio
         
-        # Combine all requirements
-        all_requirements = text_requirements + image_requirements
+        if not hasattr(self.ai_client, 'extract_requirements_from_image'):
+            return []
         
-        # Create section object
-        section = Section(
-            number=toc_entry.number,
-            title=toc_entry.title,
-            page_start=start_page,
-            page_end=end_page-1 if end_page else None,
-            raw_text=section_text,
-            requirements=all_requirements
+        # Run sync AI client call in thread pool
+        loop = asyncio.get_running_loop()
+        requirements = await loop.run_in_executor(
+            None,
+            self.ai_client.extract_requirements_from_image,
+            image_path,
+            page_num,  # page_number (ADDED!)
+            "Page",  # section_number
+            f"Page {page_num}"  # section_title
         )
         
-        # Store image metadata in section
-        if self.page_image_metadata:
-            for page_num in range(start_page, end_page or len(self.pages) + 1):
-                if page_num in self.page_image_metadata:
-                    section.images.extend(self.page_image_metadata[page_num])
+        # Set metadata for each requirement
+        for req in requirements:
+            req.source_page = page_num
+            req.section_number = None
+            req.source_type = "image"
         
-        logger.info(f"Extracted {len(text_requirements)} text + {len(image_requirements)} image = {len(all_requirements)} total requirements from section {toc_entry.number}")
-        return section
+        return requirements
     
     def save_registry(self) -> Path:
         """Save requirements registry to JSON file.

@@ -186,7 +186,6 @@ const fetchMetrics = async () => {
     const response = await documentsApi.getMetrics(props.documentId)
     metrics.value = response.data
   } catch (err) {
-    console.error('Failed to fetch metrics:', err)
     error.value = err.response?.data?.detail || 'Не удалось загрузить метрики'
   } finally {
     loading.value = false
