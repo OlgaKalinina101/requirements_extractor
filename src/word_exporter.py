@@ -134,8 +134,11 @@ def generate_word_from_db(document, sections: List, all_requirements: List, metr
         for req in reqs:
             row = table.add_row().cells
             row[0].text = req.requirement_id or ""
-            # Show human-edited text if available, otherwise original AI text
-            row[1].text = req.human_edited or req.text or ""
+            # Build requirement text: human-edited (or AI text) + subitems
+            display_text = req.human_edited or req.text or ""
+            if req.subitems:
+                display_text += "\n" + "\n".join(f"• {item}" for item in req.subitems)
+            row[1].text = display_text
             row[2].text = req.type or ""
             row[3].text = req.priority or ""
             row[4].text = str(req.page_number or "")

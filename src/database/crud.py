@@ -370,7 +370,7 @@ def get_requirements_by_document(
     status: Optional[str] = None,
     type: Optional[RequirementType] = None,
     skip: int = 0,
-    limit: int = 1000,
+    limit: Optional[int] = None,
 ) -> List[Requirement]:
     """Get all requirements for a document with optional filters.
 
@@ -383,7 +383,7 @@ def get_requirements_by_document(
         status: Filter by status (optional)
         type: Filter by type (optional)
         skip: Number of records to skip
-        limit: Maximum number of records to return
+        limit: Maximum records to return; None means no limit (used for exports)
 
     Returns:
         List of Requirement instances (with .section pre-loaded)
@@ -399,7 +399,10 @@ def get_requirements_by_document(
     if type:
         query = query.filter(Requirement.type == type)
 
-    return query.offset(skip).limit(limit).all()
+    query = query.offset(skip)
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
 
 
 def accept_requirement(

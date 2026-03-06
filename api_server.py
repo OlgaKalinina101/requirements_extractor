@@ -527,7 +527,7 @@ async def get_requirements(
     status: Optional[str] = None,
     type: Optional[str] = None,
     skip: int = 0,
-    limit: int = 1000,
+    limit: int = 5000,
     db=Depends(get_db),
 ):
     """Get requirements for a document with optional filters.
@@ -1106,6 +1106,7 @@ async def export_json(
                         "page_number": req.page_number,
                         "section_number": section.section_number,
                         "section_title": section.title,
+                        "subitems": req.subitems or [],
                         "status": req.status,
                         "human_edited": req.human_edited,
                         "edit_reason": req.edit_reason,
@@ -1164,7 +1165,7 @@ async def export_txt(
         # Build report
         lines = [
             "=" * 80,
-            "ОТЧЕТ О ОБРАБОТКЕ ДОКУМЕНТА",
+            "РЕЕСТР ТРЕБОВАНИЙ",
             "=" * 80,
             "",
             f"Документ: {document.filename}",
@@ -1177,45 +1178,60 @@ async def export_txt(
             "",
             f"Всего требований: {len(all_requirements)}",
             f"Всего разделов: {len(sections)}",
-            ""
+            "",
         ]
-        
+
         if metrics:
             lines.extend([
                 f"Всего страниц: {metrics.total_pages}",
                 f"Обработано страниц: {metrics.processed_pages}",
                 f"Пропущено страниц: {len(metrics.skipped_pages) if metrics.skipped_pages else 0}",
                 f"Покрытие: {metrics.coverage_percent:.1f}%",
-                ""
+                "",
             ])
-        
-        # Requirements by type
+
         if metrics and metrics.requirements_by_type:
-            lines.extend([
-                "=" * 80,
-                "ТРЕБОВАНИЯ ПО ТИПАМ",
-                "=" * 80,
-                ""
-            ])
+            lines.extend(["=" * 80, "ТРЕБОВАНИЯ ПО ТИПАМ", "=" * 80, ""])
             for req_type, count in metrics.requirements_by_type.items():
-                lines.append(f"{req_type}: {count}")
+                lines.append(f"  {req_type}: {count}")
             lines.append("")
-        
-        # Sections
-        lines.extend([
-            "=" * 80,
-            "РАЗДЕЛЫ",
-            "=" * 80,
-            ""
-        ])
-        
+
+        # Full requirements listing grouped by section
+        lines.extend(["=" * 80, "ПОЛНЫЙ РЕЕСТР ТРЕБОВАНИЙ", "=" * 80, ""])
+
+        assigned_ids: set = set()
         for section in sections:
             section_requirements = [r for r in all_requirements if r.section_id == section.id]
-            lines.append(f"{section.section_number}. {section.title}")
-            lines.append(f"  Страницы: {section.page_start} - {section.page_end}")
-            lines.append(f"  Требований: {len(section_requirements)}")
+            assigned_ids.update(r.id for r in section_requirements)
+
+            lines.append(f"{'─' * 60}")
+            lines.append(f"Раздел {section.section_number}: {section.title}")
+            lines.append(f"Страницы: {section.page_start} – {section.page_end}  |  Требований: {len(section_requirements)}")
+            lines.append(f"{'─' * 60}")
             lines.append("")
-        
+
+            for req in section_requirements:
+                display_text = req.human_edited or req.text or ""
+                lines.append(f"[{req.requirement_id}] стр.{req.page_number or '?'}  [{req.type or '—'}]  [{req.priority or '—'}]  [{req.status}]")
+                lines.append(f"  {display_text}")
+                if req.subitems:
+                    for item in req.subitems:
+                        lines.append(f"    • {item}")
+                lines.append("")
+
+        # Orphan requirements (section_id is NULL)
+        orphans = [r for r in all_requirements if r.id not in assigned_ids]
+        if orphans:
+            lines.extend([f"{'─' * 60}", f"Требования без раздела  ({len(orphans)} шт.)", f"{'─' * 60}", ""])
+            for req in orphans:
+                display_text = req.human_edited or req.text or ""
+                lines.append(f"[{req.requirement_id}] стр.{req.page_number or '?'}  [{req.type or '—'}]  [{req.priority or '—'}]  [{req.status}]")
+                lines.append(f"  {display_text}")
+                if req.subitems:
+                    for item in req.subitems:
+                        lines.append(f"    • {item}")
+                lines.append("")
+
         lines.append("=" * 80)
         
         # Save to temporary file
