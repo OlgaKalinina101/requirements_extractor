@@ -861,10 +861,12 @@ async def get_requirement(requirement_id: int, db=Depends(get_db), _current=Depe
             "id": requirement.id,
             "requirement_id": requirement.requirement_id,
             "text": requirement.text,
-            "type": requirement.type,  # Already a string
-            "priority": requirement.priority,  # Already a string
+            "type": requirement.type,
+            "priority": requirement.priority,
             "page_number": requirement.page_number,
             "status": requirement.status,
+            "subitems": requirement.subitems or [],
+            "assignee_id": requirement.assignee_id,
             "ai_suggested": requirement.ai_suggested,
             "human_edited": requirement.human_edited,
             "edit_reason": requirement.edit_reason,
@@ -872,6 +874,8 @@ async def get_requirement(requirement_id: int, db=Depends(get_db), _current=Depe
             "edited_at": requirement.edited_at.isoformat() if requirement.edited_at else None,
             "document_id": requirement.document_id,
             "section_id": requirement.section_id,
+            "section_number": requirement.section.section_number if requirement.section else None,
+            "section_title": requirement.section.title if requirement.section else None,
             "created_at": requirement.created_at.isoformat() if requirement.created_at else None,
         }
     except HTTPException:

@@ -53,6 +53,37 @@
               </v-col>
             </v-row>
 
+            <!-- Section -->
+            <div v-if="requirement.section_number || requirement.section_title" class="mb-3">
+              <div class="text-caption text-medium-emphasis">Раздел</div>
+              <div class="text-body-2 mt-1">
+                <strong v-if="requirement.section_number">{{ requirement.section_number }}</strong>
+                {{ requirement.section_title }}
+              </div>
+            </div>
+
+            <!-- Main text + subitems -->
+            <div class="mb-4">
+              <div class="text-subtitle-2 mb-1">Текст требования</div>
+              <div class="text-body-1">{{ requirement.text }}</div>
+              <v-list
+                v-if="requirement.subitems && requirement.subitems.length"
+                density="compact"
+                class="ml-4 mt-2 pa-0"
+              >
+                <v-list-item
+                  v-for="(item, i) in requirement.subitems"
+                  :key="i"
+                  class="subitem px-2 mb-1"
+                >
+                  <template #prepend>
+                    <v-icon size="small" color="primary">mdi-circle-small</v-icon>
+                  </template>
+                  <v-list-item-title class="text-body-2">{{ item }}</v-list-item-title>
+                </v-list-item>
+              </v-list>
+            </div>
+
             <!-- AI text vs edited text -->
             <div v-if="requirement.human_edited" class="mb-4">
               <div class="text-subtitle-2 text-medium-emphasis mb-1">Исходный текст AI</div>

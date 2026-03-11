@@ -425,7 +425,12 @@ def get_requirement(db: Session, requirement_id: int) -> Optional[Requirement]:
     Returns:
         Requirement instance or None if not found
     """
-    return db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    return (
+        db.query(Requirement)
+        .options(joinedload(Requirement.section))
+        .filter(Requirement.id == requirement_id)
+        .first()
+    )
 
 
 def get_requirements_by_document(

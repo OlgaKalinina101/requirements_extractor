@@ -97,6 +97,20 @@
 
     <v-divider />
 
+    <!-- Always visible: open detail page with comments -->
+    <v-card-actions class="px-3 py-1">
+      <v-btn
+        size="small"
+        variant="text"
+        prepend-icon="mdi-comment-text-outline"
+        @click.stop="router.push(`/requirement/${requirement.id}`)"
+      >
+        Подробнее и комментарии
+      </v-btn>
+    </v-card-actions>
+
+    <v-divider />
+
     <!-- Assignment & execution status row — always visible -->
     <v-card-actions class="px-3 py-2 flex-wrap ga-2">
       <!-- Assign button (manager+) -->
@@ -217,6 +231,7 @@
 
 <script setup>
 import { ref, watch, computed, inject } from 'vue'
+import { useRouter } from 'vue-router'
 import { useRequirementTranslations } from '@/composables/useRequirementTranslations'
 import { useAuthStore } from '@/stores/auth'
 import { requirementsApi } from '@/services/api'
@@ -225,6 +240,7 @@ import { useNotificationsStore } from '@/stores/notifications'
 const { translateType, translatePriority } = useRequirementTranslations()
 const auth = useAuthStore()
 const notifications = useNotificationsStore()
+const router = useRouter()
 
 // Users list injected from parent ReviewView
 const users = inject('users', ref([]))
