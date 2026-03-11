@@ -1,8 +1,5 @@
 import axios from 'axios'
 
-// Use relative URLs to leverage Vite's proxy configuration
-// This ensures all requests go through the dev server (localhost:3000)
-// which then proxies them to the API server (localhost:8000)
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
 const api = axios.create({
@@ -11,6 +8,31 @@ const api = axios.create({
     'Content-Type': 'application/json'
   }
 })
+
+// Attach JWT token to every request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+// On 401 — clear token and redirect to /login
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Avoid redirect loop on the login page itself
+      if (!window.location.pathname.startsWith('/login')) {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`
+      }
+    }
+    return Promise.reject(error)
+  }
+)
 
 // Projects API
 export const projectsApi = {
@@ -59,9 +81,8 @@ export const documentsApi = {
     })
   },
   
-  getRequirements: (documentId, params = {}) => {
-    return api.get(`/api/documents/${documentId}/requirements`, { params })
-  },
+  getRequirements: (documentId, params = {}) =>
+    api.get(`/api/documents/${documentId}/requirements`, { params }),
   
   getMetrics: (documentId) => {
     return api.get(`/api/documents/${documentId}/metrics`)
@@ -70,25 +91,32 @@ export const documentsApi = {
 
 // Requirements API
 export const requirementsApi = {
-  // Get requirement by ID
   getById: (id) => api.get(`/api/requirements/${id}`),
-  
-  // Accept requirement
   accept: (id) => api.post(`/api/requirements/${id}/accept`),
-  
-  // Reject requirement
-  reject: (id, reason = null) => {
-    return api.post(`/api/requirements/${id}/reject`, reason ? { reason } : {})
-  },
-  
-  // Edit requirement
-  edit: (id, editedText, reason = null, editedBy = null) => {
-    return api.post(`/api/requirements/${id}/edit`, {
-      edited_text: editedText,
-      reason,
-      edited_by: editedBy
-    })
-  }
+  reject: (id, reason = null) => api.post(`/api/requirements/${id}/reject`, reason ? { reason } : {}),
+  edit: (id, editedText, reason = null, editedBy = null) =>
+    api.post(`/api/requirements/${id}/edit`, { edited_text: editedText, reason, edited_by: editedBy }),
+  assign: (id, assigneeId) =>
+    api.post(`/api/requirements/${id}/assign`, { assignee_id: assigneeId }),
+  setStatus: (id, status) =>
+    api.post(`/api/requirements/${id}/set-status`, { status }),
+  getComments: (id) => api.get(`/api/requirements/${id}/comments`),
+  addComment: (id, text) => api.post(`/api/requirements/${id}/comments`, { text }),
+  deleteComment: (commentId) => api.delete(`/api/comments/${commentId}`),
+}
+
+// Auth API
+export const authApi = {
+  login: (email, password) => api.post('/api/auth/login', { email, password }),
+  me: () => api.get('/api/auth/me'),
+}
+
+// Users API (admin)
+export const usersApi = {
+  getAll: () => api.get('/api/users'),
+  create: (data) => api.post('/api/users', data),
+  update: (id, data) => api.put(`/api/users/${id}`, data),
+  deactivate: (id) => api.delete(`/api/users/${id}`),
 }
 
 // Export URLs (use as href for download links)

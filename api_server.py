@@ -35,6 +35,7 @@ from src.logger import setup_logger
 from src.models import RequirementType
 from src.database.database import get_db, init_db, SessionLocal
 from src.database import crud
+from src.auth.dependencies import get_current_user, require_admin, require_manager
 
 
 @contextmanager
@@ -55,16 +56,49 @@ setup_logger(name="src.openrouter_client", log_file=Path("logs/openrouter.log"),
 setup_logger(name="src.requirements_extractor", log_file=Path("logs/extractor.log"), level="INFO")
 setup_logger(name="src.pdf_processor", log_file=Path("logs/pdf.log"), level="INFO")
 
+def _seed_admin_if_needed() -> None:
+    """Ensure the default admin user exists and has the password from env vars.
+
+    - If no users exist: creates the admin.
+    - If the admin email exists: updates the password from env (so changing
+      ADMIN_PASSWORD in .env and restarting always takes effect).
+    """
+    from src.auth.password import hash_password
+    from src.database.models import User as UserModel
+
+    email = os.getenv("ADMIN_EMAIL", "admin@example.com")
+    password = os.getenv("ADMIN_PASSWORD", "changeme")
+    name = os.getenv("ADMIN_NAME", "Администратор")
+
+    with db_session() as db:
+        existing = crud.get_user_by_email(db, email)
+        if existing:
+            # Always sync the password from env so restarts with new password work
+            db.query(UserModel).filter(UserModel.id == existing.id).update(
+                {"hashed_password": hash_password(password)}
+            )
+            db.commit()
+            logger.info(f"Admin password synced from env: {email}")
+        else:
+            crud.create_user(db, email=email, hashed_password=hash_password(password), full_name=name, role="admin")
+            logger.info(f"Created default admin user: {email}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler — runs startup and shutdown logic."""
+    """Application lifespan handler — runs startup and shutdown logic.
+
+    In Docker: schema is managed by `alembic upgrade head` in entrypoint.sh.
+    In local dev (without entrypoint): init_db() creates tables as fallback.
+    """
     try:
+        # Fallback for local dev without entrypoint.sh (alembic not run manually)
         init_db()
-        logger.info("Database initialized successfully")
+        _seed_admin_if_needed()
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        logger.warning("Continuing without database - some features may not work")
-    logger.info("WebSocket logging system initialized - handlers will be attached per extraction session")
+        logger.error(f"Startup error: {e}")
+        logger.warning("Continuing — some features may not work")
+    logger.info("WebSocket logging system initialized")
     yield
 
 
@@ -292,6 +326,165 @@ async def health_check() -> Dict[str, str]:
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
+# ========== Auth Endpoints ==========
+
+
+class LoginRequest(BaseModel):
+    """Login request body."""
+    email: str = Field(..., description="User email")
+    password: str = Field(..., description="Password")
+
+
+class LoginResponse(BaseModel):
+    """Login response with JWT."""
+    access_token: str = Field(..., description="JWT access token")
+    token_type: str = Field(default="bearer", description="Token type")
+    user: Dict[str, Any] = Field(..., description="User info")
+
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def login(request: LoginRequest, db=Depends(get_db)):
+    """Authenticate user and return JWT token."""
+    from src.auth.password import verify_password
+    from src.auth.jwt import create_access_token
+
+    user = crud.get_user_by_email(db, request.email)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not verify_password(request.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = create_access_token(data={"sub": str(user.id)})
+    return LoginResponse(
+        access_token=token,
+        token_type="bearer",
+        user={
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role,
+        },
+    )
+
+
+@app.get("/api/auth/me")
+async def get_me(current_user=Depends(get_current_user)):
+    """Get current authenticated user."""
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "role": current_user.role,
+        "is_active": current_user.is_active,
+    }
+
+
+# ========== Users Management (admin only) ==========
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    full_name: Optional[str] = None
+    role: str = "user"
+
+
+class UpdateUserRequest(BaseModel):
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
+
+
+def _user_to_dict(user) -> Dict[str, Any]:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "is_active": user.is_active,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+
+
+@app.get("/api/users")
+async def list_users(
+    db=Depends(get_db),
+    _current=Depends(get_current_user),
+):
+    """List all users. Any authenticated user can view (for assignee pickers)."""
+    users = crud.list_users(db)
+    return [_user_to_dict(u) for u in users]
+
+
+@app.post("/api/users", status_code=201)
+async def create_user(
+    request: CreateUserRequest,
+    db=Depends(get_db),
+    _current=Depends(require_admin),
+):
+    """Create a new user. Admin only."""
+    from src.auth.password import hash_password
+
+    if crud.get_user_by_email(db, request.email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    if request.role not in ("admin", "manager", "user"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    user = crud.create_user(
+        db,
+        email=request.email,
+        hashed_password=hash_password(request.password),
+        full_name=request.full_name,
+        role=request.role,
+    )
+    return _user_to_dict(user)
+
+
+@app.put("/api/users/{user_id}")
+async def update_user(
+    user_id: int,
+    request: UpdateUserRequest,
+    db=Depends(get_db),
+    _current=Depends(require_admin),
+):
+    """Update user. Admin only."""
+    from src.auth.password import hash_password
+    from src.database.models import User as UserModel
+
+    user = crud.update_user(
+        db,
+        user_id,
+        full_name=request.full_name,
+        role=request.role,
+        is_active=request.is_active,
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if request.password:
+        db.query(UserModel).filter(UserModel.id == user_id).update(
+            {"hashed_password": hash_password(request.password)}
+        )
+        db.commit()
+        db.refresh(user)
+
+    return _user_to_dict(user)
+
+
+@app.delete("/api/users/{user_id}", status_code=204)
+async def delete_user(
+    user_id: int,
+    db=Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Deactivate (soft-delete) a user. Admin only."""
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
+    user = crud.update_user(db, user_id, is_active=False)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+
 @app.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time log streaming.
@@ -398,6 +591,7 @@ async def extract_requirements(
     generate_word: bool = Form(True),
     model: str = Form("claude-sonnet-4.5", description="AI model identifier"),
     project_id: Optional[str] = Form(None, description="Project ID to associate document with"),
+    _current=Depends(require_manager),
 ) -> ExtractionResult:
     """Extract requirements from uploaded PDF using OpenRouter AI models.
 
@@ -460,6 +654,7 @@ async def get_all_documents(
     limit: int = 100,
     project_id: Optional[int] = Query(None, description="Filter by project"),
     db=Depends(get_db),
+    _current=Depends(get_current_user),
 ):
     """Get all documents with pagination. Optionally filter by project."""
     try:
@@ -526,9 +721,11 @@ async def get_requirements(
     document_id: int,
     status: Optional[str] = None,
     type: Optional[str] = None,
+    assignee_id: Optional[str] = None,
     skip: int = 0,
     limit: int = 5000,
     db=Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """Get requirements for a document with optional filters.
     
@@ -555,12 +752,23 @@ async def get_requirements(
                 req_type = RequirementType(type)
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid requirement type: {type}")
-        
+
+        # Resolve assignee_id filter: "me" → current user's id
+        assignee_filter: Optional[int] = None
+        if assignee_id == "me":
+            assignee_filter = current_user.id
+        elif assignee_id:
+            try:
+                assignee_filter = int(assignee_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid assignee_id")
+
         requirements = crud.get_requirements_by_document(
             db=db,
             document_id=document_id,
             status=status,
             type=req_type,
+            assignee_id=assignee_filter,
             skip=skip,
             limit=limit,
         )
@@ -575,6 +783,7 @@ async def get_requirements(
                     "priority": req.priority,
                     "page_number": req.page_number,
                     "status": req.status,
+                    "assignee_id": req.assignee_id,
                     "ai_suggested": req.ai_suggested,
                     "human_edited": req.human_edited,
                     "edit_reason": req.edit_reason,
@@ -634,7 +843,7 @@ async def get_metrics(document_id: int, db=Depends(get_db)):
 
 
 @app.get("/api/requirements/{requirement_id}")
-async def get_requirement(requirement_id: int, db=Depends(get_db)):
+async def get_requirement(requirement_id: int, db=Depends(get_db), _current=Depends(get_current_user)):
     """Get requirement by ID with full details.
     
     Args:
@@ -675,7 +884,7 @@ async def get_requirement(requirement_id: int, db=Depends(get_db)):
 # ========== Review API Endpoints ==========
 
 @app.post("/api/requirements/{requirement_id}/accept")
-async def accept_requirement_endpoint(requirement_id: int, db=Depends(get_db)):
+async def accept_requirement_endpoint(requirement_id: int, db=Depends(get_db), _current=Depends(require_manager)):
     """Accept a requirement (mark as accepted).
     
     Marks the requirement as accepted, meaning the AI-suggested text
@@ -715,6 +924,7 @@ async def reject_requirement_endpoint(
     requirement_id: int,
     request: Optional[RejectRequirementRequest] = None,
     db=Depends(get_db),
+    _current=Depends(require_manager),
 ):
     """Reject a requirement (mark as rejected).
     
@@ -759,6 +969,7 @@ async def edit_requirement_endpoint(
     requirement_id: int,
     request: EditRequirementRequest,
     db=Depends(get_db),
+    _current=Depends(require_manager),
 ):
     """Edit a requirement (mark as modified).
     
@@ -803,6 +1014,171 @@ async def edit_requirement_endpoint(
     except Exception as e:
         logger.error(f"[REVIEW] Failed to edit requirement {requirement_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class AssignRequest(BaseModel):
+    assignee_id: Optional[int] = None
+
+
+@app.post("/api/requirements/{requirement_id}/assign")
+async def assign_requirement(
+    requirement_id: int,
+    request: AssignRequest,
+    db=Depends(get_db),
+    current_user=Depends(require_manager),
+):
+    """Assign (or unassign) an executor to a requirement. Manager/admin only."""
+    from src.database.models import Requirement as ReqModel
+
+    req = db.query(ReqModel).filter(ReqModel.id == requirement_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    if request.assignee_id is not None:
+        assignee = crud.get_user_by_id(db, request.assignee_id)
+        if not assignee:
+            raise HTTPException(status_code=404, detail="User not found")
+
+    req.assignee_id = request.assignee_id
+    db.commit()
+    db.refresh(req)
+
+    assignee_info = None
+    if req.assignee_id:
+        u = crud.get_user_by_id(db, req.assignee_id)
+        assignee_info = {"id": u.id, "full_name": u.full_name, "email": u.email} if u else None
+
+    return {"requirement_id": requirement_id, "assignee": assignee_info}
+
+
+# ========== Execution Status Endpoint ==========
+
+# Manager statuses (review pipeline): pending, accepted, rejected, modified
+# Executor statuses (work tracking):   in_progress, done, blocked
+EXECUTION_STATUSES = {"in_progress", "done", "blocked"}
+MANAGER_STATUSES = {"pending", "accepted", "rejected", "modified"}
+ALL_STATUSES = EXECUTION_STATUSES | MANAGER_STATUSES
+
+
+class SetStatusRequest(BaseModel):
+    status: str
+
+
+@app.post("/api/requirements/{requirement_id}/set-status")
+async def set_requirement_status(
+    requirement_id: int,
+    request: SetStatusRequest,
+    db=Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Update requirement execution status.
+
+    - Execution statuses (in_progress / done / blocked): any authenticated user,
+      but only for requirements assigned to them (unless admin/manager).
+    - Manager statuses (accepted / rejected / modified): manager+ only.
+      Use the dedicated /accept, /reject, /edit endpoints for those.
+    """
+    from src.database.models import Requirement as ReqModel
+
+    if request.status not in ALL_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Allowed: {sorted(ALL_STATUSES)}",
+        )
+
+    req = db.query(ReqModel).filter(ReqModel.id == requirement_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    # Execution statuses: user can only update their own requirements
+    if request.status in EXECUTION_STATUSES:
+        if current_user.role == "user" and req.assignee_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only update status of requirements assigned to you",
+            )
+    else:
+        # Manager statuses require manager+ role
+        if current_user.role not in ("admin", "manager"):
+            raise HTTPException(status_code=403, detail="Manager role required")
+
+    req.status = request.status
+    db.commit()
+    db.refresh(req)
+    return {"requirement_id": requirement_id, "status": req.status}
+
+
+# ========== Comments Endpoints ==========
+
+
+class CommentRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+def _comment_to_dict(comment, user=None) -> Dict[str, Any]:
+    return {
+        "id": comment.id,
+        "requirement_id": comment.requirement_id,
+        "user_id": comment.user_id,
+        "author_name": user.full_name or user.email if user else None,
+        "text": comment.text,
+        "created_at": comment.created_at.isoformat() if comment.created_at else None,
+    }
+
+
+@app.get("/api/requirements/{requirement_id}/comments")
+async def get_comments(
+    requirement_id: int,
+    db=Depends(get_db),
+    _current=Depends(get_current_user),
+):
+    """List comments for a requirement."""
+    comments = crud.get_comments(db, requirement_id)
+    result = []
+    for c in comments:
+        user = crud.get_user_by_id(db, c.user_id) if c.user_id else None
+        result.append(_comment_to_dict(c, user))
+    return result
+
+
+@app.post("/api/requirements/{requirement_id}/comments", status_code=201)
+async def add_comment(
+    requirement_id: int,
+    request: CommentRequest,
+    db=Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Add a comment to a requirement."""
+    from src.database.models import Requirement as ReqModel
+
+    req = db.query(ReqModel).filter(ReqModel.id == requirement_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    comment = crud.create_comment(db, requirement_id, current_user.id, request.text)
+    return _comment_to_dict(comment, current_user)
+
+
+@app.delete("/api/comments/{comment_id}", status_code=204)
+async def delete_comment(
+    comment_id: int,
+    db=Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Delete own comment (or admin deletes any)."""
+    from src.database.models import Comment as CommentModel
+
+    comment = db.query(CommentModel).filter(CommentModel.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if comment.user_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    deleted = crud.delete_comment(db, comment_id, current_user.id)
+    if not deleted and current_user.role == "admin":
+        # Admin force-delete
+        db.delete(comment)
+        db.commit()
 
 
 @app.get("/api/documents/{document_id}/pdf")

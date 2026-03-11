@@ -8,6 +8,8 @@
       @reject="$emit('reject', requirement.id, $event)"
       @edit="$emit('edit', requirement.id, $event.text, $event.reason)"
       @view-page="$emit('view-page', $event)"
+      @assigned="$emit('assigned', $event)"
+      @status-changed="$emit('status-changed', $event)"
     />
   </div>
 </template>
@@ -16,11 +18,8 @@
 import RequirementCard from './RequirementCard.vue'
 
 defineProps({
-  requirements: {
-    type: Array,
-    required: true
-  }
+  requirements: { type: Array, required: true }
 })
 
-defineEmits(['accept', 'reject', 'edit', 'view-page'])
+defineEmits(['accept', 'reject', 'edit', 'view-page', 'assigned', 'status-changed'])
 </script>

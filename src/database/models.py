@@ -17,6 +17,7 @@ from sqlalchemy import (
     JSON,
     Float,
     ARRAY,
+    Boolean,
     Enum as SQLEnum,
 )
 from sqlalchemy.orm import relationship, declarative_base
@@ -25,6 +26,26 @@ from sqlalchemy.sql import func
 from src.models import RequirementType, RequirementPriority
 
 Base = declarative_base()
+
+
+class User(Base):
+    """User model - for authentication and role-based access.
+
+    Roles: admin, manager, user
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    role = Column(String(50), default="user", nullable=False)  # admin, manager, user
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    # Relationships
+    assigned_requirements = relationship("Requirement", back_populates="assignee", foreign_keys="Requirement.assignee_id")
+    comments = relationship("Comment", back_populates="author", cascade="all, delete-orphan")
 
 
 class Project(Base):
@@ -134,7 +155,8 @@ class Requirement(Base):
     page_number = Column(Integer, nullable=True)
     bbox = Column(JSON, nullable=True)  # Bounding box: {"x": 0, "y": 0, "width": 100, "height": 50}
     subitems = Column(JSON, nullable=True)  # List items if requirement is grouped
-    
+    assignee_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # Review fields
     status = Column(String(50), default="pending", nullable=False, index=True)
     ai_suggested = Column(Text, nullable=False)  # Original AI text
@@ -148,6 +170,8 @@ class Requirement(Base):
     # Relationships
     document = relationship("Document", back_populates="requirements")
     section = relationship("Section", back_populates="requirements")
+    assignee = relationship("User", back_populates="assigned_requirements", foreign_keys=[assignee_id])
+    comments = relationship("Comment", back_populates="requirement", cascade="all, delete-orphan")
 
 
 class CoverageMetrics(Base):
@@ -181,3 +205,18 @@ class CoverageMetrics(Base):
     
     # Relationships
     document = relationship("Document", back_populates="coverage_metrics")
+
+
+class Comment(Base):
+    """Comment on a requirement - for assignees to add notes."""
+    __tablename__ = "comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    # Relationships
+    requirement = relationship("Requirement", back_populates="comments")
+    author = relationship("User", back_populates="comments")

@@ -5,7 +5,7 @@
         <h1 class="text-h4">Проекты</h1>
       </v-col>
       <v-col cols="auto">
-        <v-btn color="primary" @click="showCreateDialog = true" prepend-icon="mdi-plus">
+        <v-btn v-if="auth.isManager" color="primary" @click="showCreateDialog = true" prepend-icon="mdi-plus">
           Новый проект
         </v-btn>
       </v-col>
@@ -154,9 +154,11 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectsStore } from '../stores/projects'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const projectsStore = useProjectsStore()
+const auth = useAuthStore()
 
 const showCreateDialog = ref(false)
 const showDeleteDialog = ref(false)

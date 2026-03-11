@@ -23,17 +23,25 @@ from alembic import context
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-# Import database models and Base
+# Import database models and Base (do NOT import database.database to avoid engine creation)
 from src.database.models import Base
-from src.database.database import DATABASE_URL
+
+# Build DATABASE_URL from env without importing database module (avoids engine creation)
+_raw_url = os.getenv(
+    "DATABASE_URL",
+    "postgresql://requirements_user:requirements_pass@localhost:5433/requirements_db",
+)
+if _raw_url.startswith("postgresql://") and "+" not in _raw_url:
+    _database_url = _raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
+elif _raw_url.startswith("postgresql+psycopg2://"):
+    _database_url = _raw_url.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+else:
+    _database_url = _raw_url
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-
-# Override sqlalchemy.url from environment variable if present
-database_url = os.getenv("DATABASE_URL", DATABASE_URL)
-config.set_main_option("sqlalchemy.url", database_url)
+config.set_main_option("sqlalchemy.url", _database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

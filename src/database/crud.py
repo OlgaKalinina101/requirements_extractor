@@ -19,8 +19,72 @@ from src.database.models import (
     Section,
     Requirement,
     CoverageMetrics,
+    User,
+    Comment,
 )
 from src.models import RequirementType
+
+
+# ========== User CRUD ==========
+
+
+def create_user(
+    db: Session,
+    email: str,
+    hashed_password: str,
+    full_name: Optional[str] = None,
+    role: str = "user",
+) -> User:
+    """Create a new user."""
+    db_user = User(
+        email=email,
+        hashed_password=hashed_password,
+        full_name=full_name,
+        role=role,
+        is_active=True,
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+    """Get user by ID."""
+    return db.query(User).filter(User.id == user_id).first()
+
+
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    """Get user by email."""
+    return db.query(User).filter(User.email == email).first()
+
+
+def list_users(db: Session, skip: int = 0, limit: int = 100) -> List[User]:
+    """List all users."""
+    return db.query(User).order_by(User.created_at.desc()).offset(skip).limit(limit).all()
+
+
+def update_user(
+    db: Session,
+    user_id: int,
+    *,
+    full_name: Optional[str] = None,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+) -> Optional[User]:
+    """Update user fields."""
+    user = get_user_by_id(db, user_id)
+    if not user:
+        return None
+    if full_name is not None:
+        user.full_name = full_name
+    if role is not None:
+        user.role = role
+    if is_active is not None:
+        user.is_active = is_active
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 # ========== Project CRUD ==========
@@ -369,6 +433,7 @@ def get_requirements_by_document(
     document_id: int,
     status: Optional[str] = None,
     type: Optional[RequirementType] = None,
+    assignee_id: Optional[int] = None,
     skip: int = 0,
     limit: Optional[int] = None,
 ) -> List[Requirement]:
@@ -398,6 +463,8 @@ def get_requirements_by_document(
         query = query.filter(Requirement.status == status)
     if type:
         query = query.filter(Requirement.type == type)
+    if assignee_id is not None:
+        query = query.filter(Requirement.assignee_id == assignee_id)
 
     query = query.offset(skip)
     if limit is not None:
@@ -601,4 +668,36 @@ def bulk_create_requirements(
     db.commit()
     
     return len(requirements_data)
+
+
+# ========== Comments CRUD ==========
+
+
+def create_comment(db: Session, requirement_id: int, user_id: int, text: str) -> Comment:
+    """Add a comment to a requirement."""
+    comment = Comment(requirement_id=requirement_id, user_id=user_id, text=text)
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+def get_comments(db: Session, requirement_id: int) -> List[Comment]:
+    """List all comments for a requirement, oldest first."""
+    return (
+        db.query(Comment)
+        .filter(Comment.requirement_id == requirement_id)
+        .order_by(Comment.created_at.asc())
+        .all()
+    )
+
+
+def delete_comment(db: Session, comment_id: int, user_id: int) -> bool:
+    """Delete a comment. Only author can delete. Returns True if deleted."""
+    comment = db.query(Comment).filter(Comment.id == comment_id, Comment.user_id == user_id).first()
+    if not comment:
+        return False
+    db.delete(comment)
+    db.commit()
+    return True
 

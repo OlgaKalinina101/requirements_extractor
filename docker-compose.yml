@@ -26,6 +26,11 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - DATABASE_URL=postgresql://requirements_user:requirements_pass@postgres:5432/requirements_db
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production-use-long-random-string}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      - ADMIN_NAME=${ADMIN_NAME:-Администратор}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

@@ -70,6 +70,8 @@
                   @reject="handleReject"
                   @edit="handleEdit"
                   @view-page="jumpToPdfPage"
+                  @assigned="handleAssigned"
+                  @status-changed="handleStatusChanged"
                 />
               </v-card-text>
             </v-card>
@@ -92,7 +94,7 @@
                   clearable
                   @update:model-value="updateFilters"
                 ></v-select>
-                
+
                 <v-select
                   v-model="typeFilter"
                   :items="typeOptions"
@@ -102,6 +104,16 @@
                   @update:model-value="updateFilters"
                   class="mt-2"
                 ></v-select>
+
+                <v-switch
+                  v-model="onlyMine"
+                  label="Только мои требования"
+                  density="compact"
+                  color="primary"
+                  hide-details
+                  class="mt-2"
+                  @update:model-value="toggleOnlyMine"
+                ></v-switch>
               </v-card-text>
             </v-card>
             
@@ -162,28 +174,39 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDocumentsStore } from '../stores/documents'
 import { useRequirementsStore } from '../stores/requirements'
 import RequirementsList from '../components/RequirementsList.vue'
 import PDFViewer from '../components/PDFViewer.vue'
 import MetricsPanel from '../components/MetricsPanel.vue'
+import { useAuthStore } from '@/stores/auth'
+import { usersApi } from '@/services/api'
 
 const route = useRoute()
 const documentsStore = useDocumentsStore()
 const requirementsStore = useRequirementsStore()
+const auth = useAuthStore()
 
 const pdfViewer = ref(null)
 const currentPdfPage = ref(1)
 const statusFilter = ref(null)
 const typeFilter = ref(null)
+const onlyMine = ref(false)
+
+// Users list for assignee dropdowns in RequirementCard
+const users = ref([])
+provide('users', users)
 
 const statusOptions = [
-  { title: 'Pending', value: 'pending' },
-  { title: 'Accepted', value: 'accepted' },
-  { title: 'Rejected', value: 'rejected' },
-  { title: 'Modified', value: 'modified' }
+  { title: 'На рассмотрении', value: 'pending' },
+  { title: 'Принято', value: 'accepted' },
+  { title: 'Отклонено', value: 'rejected' },
+  { title: 'Изменено', value: 'modified' },
+  { title: 'В работе', value: 'in_progress' },
+  { title: 'Выполнено', value: 'done' },
+  { title: 'Заблокировано', value: 'blocked' },
 ]
 
 const typeOptions = [
@@ -196,38 +219,53 @@ const typeOptions = [
   { title: 'Ограничение', value: 'Constraint' },
   { title: 'Процесс', value: 'Process' },
   { title: 'Поставка', value: 'Supply' },
-  { title: 'Неизвестно', value: 'Unknown' }
+  { title: 'Неизвестно', value: 'Unknown' },
 ]
 
 const updateFilters = () => {
   requirementsStore.setFilters({
     status: statusFilter.value,
-    type: typeFilter.value
+    type: typeFilter.value,
   })
+}
+
+const toggleOnlyMine = () => {
+  const documentId = route.params.documentId
+  if (!documentId) return
+  requirementsStore.fetchRequirements(
+    documentId,
+    onlyMine.value ? { assignee_id: 'me' } : {}
+  )
+}
+
+// Handle assignee update in-place without full reload
+const handleAssigned = ({ requirementId, assigneeId }) => {
+  const req = requirementsStore.requirements.find(r => r.id === requirementId)
+  if (req) req.assignee_id = assigneeId
+}
+
+// Handle execution status change in-place
+const handleStatusChanged = ({ requirementId, status }) => {
+  const req = requirementsStore.requirements.find(r => r.id === requirementId)
+  if (req) req.status = status
 }
 
 const handleAccept = async (requirementId) => {
   try {
     await requirementsStore.acceptRequirement(requirementId)
-  } catch {
-    // store handles error state
-  }
+  } catch { /* store handles error */ }
 }
 
 const handleReject = async (requirementId, reason) => {
   try {
     await requirementsStore.rejectRequirement(requirementId, reason)
-  } catch {
-    // store handles error state
-  }
+  } catch { /* store handles error */ }
 }
 
 const handleEdit = async (requirementId, editedText, reason) => {
   try {
     await requirementsStore.editRequirement(requirementId, editedText, reason)
-  } catch {
-    // store handles error state
-  }
+  } catch { /* store handles error */ }
 }
 
 const jumpToPdfPage = (pageNumber) => {
@@ -237,10 +275,7 @@ const jumpToPdfPage = (pageNumber) => {
   }
 }
 
-const onPdfPageChanged = (page) => {
-  currentPdfPage.value = page
-}
-
+const onPdfPageChanged = (page) => { currentPdfPage.value = page }
 const onPdfLoaded = () => {}
 
 const loadData = async () => {
@@ -249,25 +284,21 @@ const loadData = async () => {
     try {
       await documentsStore.fetchDocument(documentId)
       await requirementsStore.fetchRequirements(documentId)
-      
-      // Jump to first requirement's page after loading
       const firstRequirement = requirementsStore.filteredRequirements[0]
-      if (firstRequirement && firstRequirement.page_number) {
-        currentPdfPage.value = firstRequirement.page_number
-      }
-    } catch {
-      // stores handle error state
-    }
+      if (firstRequirement?.page_number) currentPdfPage.value = firstRequirement.page_number
+    } catch { /* stores handle error */ }
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadData()
+  try {
+    const { data } = await usersApi.getAll()
+    users.value = data.map(u => ({ id: u.id, label: u.full_name || u.email }))
+  } catch { /* non-critical */ }
 })
 
-watch(() => route.params.documentId, () => {
-  loadData()
-})
+watch(() => route.params.documentId, () => { loadData() })
 </script>
 
 <style scoped>
