@@ -11,8 +11,8 @@
       <v-card-title class="d-flex align-center bg-blue-lighten-5 flex-wrap gap-2">
         <v-chip color="primary" class="mr-2">{{ requirement.requirement_id }}</v-chip>
         <span class="text-h6 flex-grow-1">{{ requirement.text }}</span>
-        <v-chip :color="getStatusColor(requirement.status)" variant="flat">
-          {{ statusLabel(requirement.status) }}
+        <v-chip :color="dicts.statusColor(requirement.status)" variant="flat">
+          {{ dicts.statusName(requirement.status) }}
         </v-chip>
       </v-card-title>
 
@@ -26,12 +26,14 @@
             <v-row class="mb-4">
               <v-col cols="6" sm="3">
                 <div class="text-caption text-medium-emphasis">Тип</div>
-                <v-chip color="blue" size="small" class="mt-1">{{ requirement.type || '—' }}</v-chip>
+                <v-chip :color="dicts.typeColor(requirement.type)" variant="tonal" size="small" class="mt-1">
+                  {{ dicts.typeName(requirement.type) || '—' }}
+                </v-chip>
               </v-col>
               <v-col cols="6" sm="3">
                 <div class="text-caption text-medium-emphasis">Приоритет</div>
-                <v-chip :color="getPriorityColor(requirement.priority)" size="small" class="mt-1">
-                  {{ requirement.priority || '—' }}
+                <v-chip :color="dicts.priorityColor(requirement.priority)" variant="tonal" size="small" class="mt-1">
+                  {{ dicts.priorityName(requirement.priority) || '—' }}
                 </v-chip>
               </v-col>
               <v-col cols="6" sm="3">
@@ -254,11 +256,13 @@ import { useRouter, useRoute } from 'vue-router'
 import { requirementsApi, usersApi } from '@/services/api'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
+import { useDictionariesStore } from '@/stores/dictionaries'
 
 const router = useRouter()
 const route = useRoute()
 const notifications = useNotificationsStore()
 const auth = useAuthStore()
+const dicts = useDictionariesStore()
 
 const loading = ref(true)
 const requirement = ref(null)
@@ -294,17 +298,6 @@ const auditLog = computed(() => {
   return log
 })
 
-function getStatusColor(s) {
-  return { pending: 'grey', accepted: 'success', rejected: 'error', modified: 'warning' }[s] || 'grey'
-}
-
-function statusLabel(s) {
-  return { pending: 'На рассмотрении', accepted: 'Принято', rejected: 'Отклонено', modified: 'Изменено' }[s] || s
-}
-
-function getPriorityColor(p) {
-  return { Mandatory: 'error', Recommended: 'warning', Optional: 'info', Unknown: 'grey' }[p] || 'grey'
-}
 
 function initials(name) {
   if (!name) return '?'

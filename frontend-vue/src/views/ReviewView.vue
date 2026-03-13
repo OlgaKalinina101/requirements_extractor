@@ -174,7 +174,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, provide } from 'vue'
+import { ref, computed, onMounted, watch, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDocumentsStore } from '../stores/documents'
 import { useRequirementsStore } from '../stores/requirements'
@@ -182,12 +182,14 @@ import RequirementsList from '../components/RequirementsList.vue'
 import PDFViewer from '../components/PDFViewer.vue'
 import MetricsPanel from '../components/MetricsPanel.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useDictionariesStore } from '@/stores/dictionaries'
 import { usersApi } from '@/services/api'
 
 const route = useRoute()
 const documentsStore = useDocumentsStore()
 const requirementsStore = useRequirementsStore()
 const auth = useAuthStore()
+const dicts = useDictionariesStore()
 
 const pdfViewer = ref(null)
 const currentPdfPage = ref(1)
@@ -199,28 +201,9 @@ const onlyMine = ref(false)
 const users = ref([])
 provide('users', users)
 
-const statusOptions = [
-  { title: 'На рассмотрении', value: 'pending' },
-  { title: 'Принято', value: 'accepted' },
-  { title: 'Отклонено', value: 'rejected' },
-  { title: 'Изменено', value: 'modified' },
-  { title: 'В работе', value: 'in_progress' },
-  { title: 'Выполнено', value: 'done' },
-  { title: 'Заблокировано', value: 'blocked' },
-]
-
-const typeOptions = [
-  { title: 'Техническое', value: 'Technical' },
-  { title: 'Функциональное', value: 'Functional' },
-  { title: 'Производительность', value: 'Performance' },
-  { title: 'Безопасность', value: 'Safety' },
-  { title: 'Документационное', value: 'Documentation' },
-  { title: 'Интерфейс', value: 'Interface' },
-  { title: 'Ограничение', value: 'Constraint' },
-  { title: 'Процесс', value: 'Process' },
-  { title: 'Поставка', value: 'Supply' },
-  { title: 'Неизвестно', value: 'Unknown' },
-]
+// Filter options come from the dictionaries store (loaded from DB)
+const statusOptions = computed(() => dicts.statusOptions)
+const typeOptions   = computed(() => dicts.typeOptions)
 
 const updateFilters = () => {
   requirementsStore.setFilters({
@@ -262,9 +245,9 @@ const handleReject = async (requirementId, reason) => {
   } catch { /* store handles error */ }
 }
 
-const handleEdit = async (requirementId, editedText, reason) => {
+const handleEdit = async (requirementId, editedText, reason, type = null, priority = null) => {
   try {
-    await requirementsStore.editRequirement(requirementId, editedText, reason)
+    await requirementsStore.editRequirement(requirementId, editedText, reason, null, type, priority)
   } catch { /* store handles error */ }
 }
 

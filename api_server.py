@@ -95,6 +95,12 @@ async def lifespan(app: FastAPI):
         # Fallback for local dev without entrypoint.sh (alembic not run manually)
         init_db()
         _seed_admin_if_needed()
+        # Seed dictionaries with defaults on first launch
+        _seed_db = SessionLocal()
+        try:
+            crud.seed_dictionary_defaults(_seed_db)
+        finally:
+            _seed_db.close()
     except Exception as e:
         logger.error(f"Startup error: {e}")
         logger.warning("Continuing — some features may not work")
@@ -290,6 +296,8 @@ class EditRequirementRequest(BaseModel):
     edited_text: str = Field(..., description="New requirement text", min_length=1)
     reason: Optional[str] = Field(None, description="Reason for editing")
     edited_by: Optional[str] = Field(None, description="User who edited the requirement")
+    type: Optional[str] = Field(None, description="Requirement type override")
+    priority: Optional[str] = Field(None, description="Requirement priority override")
 
 
 class RejectRequirementRequest(BaseModel):
@@ -993,7 +1001,9 @@ async def edit_requirement_endpoint(
             requirement_id=requirement_id,
             edited_text=request.edited_text,
             reason=request.reason,
-            edited_by=request.edited_by
+            edited_by=request.edited_by,
+            req_type=request.type,
+            priority=request.priority,
         )
         
         if not requirement:
@@ -1631,6 +1641,63 @@ async def export_txt(
     except Exception as e:
         logger.error(f"[EXPORT] TXT generation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== Dictionary API Endpoints ==========
+
+def _dict_item_to_dict(item) -> dict:
+    return {
+        "id": item.id,
+        "dict_type": item.dict_type,
+        "code": item.code,
+        "name": item.name,
+        "description": item.description,
+        "color": item.color,
+        "sort_order": item.sort_order,
+        "is_active": item.is_active,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+
+@app.get("/api/dictionaries/{dict_type}")
+async def get_dictionary(dict_type: str, db=Depends(get_db), _current=Depends(get_current_user)):
+    """Return all items for a given dictionary type."""
+    if dict_type not in crud.VALID_DICT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown dictionary type: {dict_type}")
+    items = crud.get_dictionary_items(db, dict_type)
+    return [_dict_item_to_dict(i) for i in items]
+
+
+@app.post("/api/dictionaries/{dict_type}", status_code=201)
+async def create_dictionary_item(dict_type: str, body: dict, db=Depends(get_db), _current=Depends(require_admin)):
+    """Create a new dictionary item. Admin only."""
+    if dict_type not in crud.VALID_DICT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown dictionary type: {dict_type}")
+    if not body.get("name"):
+        raise HTTPException(status_code=422, detail="Field 'name' is required")
+    item = crud.create_dictionary_item(db, dict_type, body)
+    return _dict_item_to_dict(item)
+
+
+@app.put("/api/dictionaries/{dict_type}/{item_id}")
+async def update_dictionary_item(dict_type: str, item_id: int, body: dict, db=Depends(get_db), _current=Depends(require_admin)):
+    """Update a dictionary item. Admin only."""
+    if dict_type not in crud.VALID_DICT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown dictionary type: {dict_type}")
+    item = crud.update_dictionary_item(db, item_id, body)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return _dict_item_to_dict(item)
+
+
+@app.delete("/api/dictionaries/{dict_type}/{item_id}", status_code=204)
+async def delete_dictionary_item(dict_type: str, item_id: int, db=Depends(get_db), _current=Depends(require_admin)):
+    """Delete a dictionary item. Admin only."""
+    if dict_type not in crud.VALID_DICT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown dictionary type: {dict_type}")
+    deleted = crud.delete_dictionary_item(db, item_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Item not found")
 
 
 if __name__ == "__main__":

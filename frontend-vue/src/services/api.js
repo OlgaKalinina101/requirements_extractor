@@ -94,8 +94,8 @@ export const requirementsApi = {
   getById: (id) => api.get(`/api/requirements/${id}`),
   accept: (id) => api.post(`/api/requirements/${id}/accept`),
   reject: (id, reason = null) => api.post(`/api/requirements/${id}/reject`, reason ? { reason } : {}),
-  edit: (id, editedText, reason = null, editedBy = null) =>
-    api.post(`/api/requirements/${id}/edit`, { edited_text: editedText, reason, edited_by: editedBy }),
+  edit: (id, editedText, reason = null, editedBy = null, type = null, priority = null) =>
+    api.post(`/api/requirements/${id}/edit`, { edited_text: editedText, reason, edited_by: editedBy, type, priority }),
   assign: (id, assigneeId) =>
     api.post(`/api/requirements/${id}/assign`, { assignee_id: assigneeId }),
   setStatus: (id, status) =>

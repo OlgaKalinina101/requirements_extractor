@@ -207,6 +207,28 @@ class CoverageMetrics(Base):
     document = relationship("Document", back_populates="coverage_metrics")
 
 
+class DictionaryItem(Base):
+    """Generic dictionary item for editable reference data.
+
+    Covers requirement types, priorities, and lifecycle statuses.
+    The `dict_type` column distinguishes which dictionary an item belongs to:
+      - 'requirement_types'
+      - 'priorities'
+      - 'statuses'
+    """
+    __tablename__ = "dictionary_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    dict_type = Column(String(50), nullable=False, index=True)
+    code = Column(String(100), nullable=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    color = Column(String(50), nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+
 class Comment(Base):
     """Comment on a requirement - for assignees to add notes."""
     __tablename__ = "comments"

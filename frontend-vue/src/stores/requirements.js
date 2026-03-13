@@ -107,9 +107,9 @@ export const useRequirementsStore = defineStore('requirements', {
       }
     },
 
-    async editRequirement(id, editedText, reason = null, editedBy = null) {
+    async editRequirement(id, editedText, reason = null, editedBy = null, type = null, priority = null) {
       try {
-        const response = await requirementsApi.edit(id, editedText, reason, editedBy)
+        const response = await requirementsApi.edit(id, editedText, reason, editedBy, type, priority)
         // Update local state
         const req = this.requirements.find(r => r.id === id)
         if (req) {
@@ -119,6 +119,8 @@ export const useRequirementsStore = defineStore('requirements', {
           req.edit_reason = reason
           req.edited_by = editedBy
           req.edited_at = response.data.edited_at
+          if (type) req.type = type
+          if (priority) req.priority = priority
         }
         return response.data
       } catch (error) {

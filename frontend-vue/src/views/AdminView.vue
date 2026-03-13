@@ -17,7 +17,7 @@
               :class="{ 'bg-blue-lighten-5': selectedDict?.id === dict.id }"
               @click="selectDictionary(dict)"
             >
-              <template v-slot:prepend>
+              <template #prepend>
                 <v-icon :color="dict.color">{{ dict.icon }}</v-icon>
               </template>
               <v-list-item-title>{{ dict.title }}</v-list-item-title>
@@ -32,37 +32,39 @@
         <v-card v-if="selectedDict">
           <v-card-title class="d-flex align-center">
             {{ selectedDict.title }}
-            <v-spacer></v-spacer>
-            <v-btn color="primary" prepend-icon="mdi-plus" @click="showAddDialog = true">
+            <v-spacer />
+            <v-btn color="primary" prepend-icon="mdi-plus" @click="openAddDialog">
               Добавить
             </v-btn>
           </v-card-title>
 
+          <v-progress-linear v-if="loadingItems" indeterminate color="primary" />
+
           <v-card-text>
             <v-data-table
               :headers="tableHeaders"
-              :items="getCurrentItems()"
-              :items-per-page="10"
+              :items="currentItems"
+              :items-per-page="15"
               class="elevation-0"
             >
-              <template v-slot:item.color="{ item }">
-                <v-chip :color="item.color" size="small" v-if="item.color">
+              <template #item.name="{ item }">
+                <v-chip v-if="item.color" :color="item.color" size="small">
                   {{ item.name }}
                 </v-chip>
                 <span v-else>{{ item.name }}</span>
               </template>
 
-              <template v-slot:item.active="{ item }">
-                <v-chip :color="item.active ? 'green' : 'grey'" size="small">
-                  {{ item.active ? 'Активно' : 'Неактивно' }}
+              <template #item.is_active="{ item }">
+                <v-chip :color="item.is_active ? 'green' : 'grey'" size="small">
+                  {{ item.is_active ? 'Активно' : 'Неактивно' }}
                 </v-chip>
               </template>
 
-              <template v-slot:item.actions="{ item }">
+              <template #item.actions="{ item }">
                 <v-btn icon size="small" variant="text" @click="editItem(item)">
                   <v-icon>mdi-pencil</v-icon>
                 </v-btn>
-                <v-btn icon size="small" variant="text" color="error" @click="deleteItem(item)">
+                <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item)">
                   <v-icon>mdi-delete</v-icon>
                 </v-btn>
               </template>
@@ -80,7 +82,7 @@
     <v-dialog v-model="showAddDialog" max-width="600">
       <v-card>
         <v-card-title>
-          {{ editingItem ? 'Редактировать' : 'Добавить' }} запись
+          {{ editingItem ? 'Редактировать запись' : 'Добавить запись' }}
         </v-card-title>
         <v-card-text>
           <v-text-field
@@ -88,15 +90,15 @@
             label="Название"
             variant="outlined"
             class="mb-3"
-          ></v-text-field>
+          />
 
           <v-text-field
-            v-if="selectedDict?.id === 'requirement_types' || selectedDict?.id === 'priorities'"
+            v-if="selectedDict?.id !== 'statuses'"
             v-model="formData.code"
-            label="Код"
+            label="Код (латиница, напр. Technical)"
             variant="outlined"
             class="mb-3"
-          ></v-text-field>
+          />
 
           <v-textarea
             v-model="formData.description"
@@ -104,26 +106,53 @@
             variant="outlined"
             rows="3"
             class="mb-3"
-          ></v-textarea>
+          />
 
           <v-select
-            v-if="selectedDict?.id === 'priorities'"
             v-model="formData.color"
-            :items="['red', 'orange', 'blue', 'grey']"
+            :items="colorOptions"
+            item-title="label"
+            item-value="value"
             label="Цвет"
             variant="outlined"
             class="mb-3"
-          ></v-select>
+            clearable
+          >
+            <template #selection="{ item }">
+              <v-chip :color="item.value" size="small">{{ item.title }}</v-chip>
+            </template>
+          </v-select>
 
-          <v-checkbox
-            v-model="formData.active"
-            label="Активно"
-          ></v-checkbox>
+          <v-text-field
+            v-model.number="formData.sort_order"
+            label="Порядок сортировки"
+            type="number"
+            variant="outlined"
+            class="mb-3"
+          />
+
+          <v-checkbox v-model="formData.is_active" label="Активно" />
         </v-card-text>
         <v-card-actions>
-          <v-spacer></v-spacer>
+          <v-spacer />
           <v-btn @click="showAddDialog = false">Отмена</v-btn>
-          <v-btn color="primary" @click="saveItem">Сохранить</v-btn>
+          <v-btn color="primary" :loading="saving" @click="saveItem">Сохранить</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Delete Confirm Dialog -->
+    <v-dialog v-model="showDeleteDialog" max-width="400">
+      <v-card>
+        <v-card-title>Удалить запись?</v-card-title>
+        <v-card-text>
+          Вы уверены, что хотите удалить <strong>{{ deletingItem?.name }}</strong>?
+          Это действие нельзя отменить.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="showDeleteDialog = false">Отмена</v-btn>
+          <v-btn color="error" :loading="deleting" @click="deleteItem">Удалить</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -131,136 +160,145 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import api from '@/services/api'
 import { useNotificationsStore } from '@/stores/notifications'
-
-const dictionaries = ref([
-  {
-    id: 'requirement_types',
-    title: 'Типы требований',
-    icon: 'mdi-shape',
-    color: 'blue',
-    count: 5
-  },
-  {
-    id: 'priorities',
-    title: 'Приоритеты',
-    icon: 'mdi-flag',
-    color: 'orange',
-    count: 4
-  },
-  {
-    id: 'statuses',
-    title: 'Статусы жизненного цикла',
-    icon: 'mdi-traffic-light',
-    color: 'green',
-    count: 6
-  },
-  {
-    id: 'users',
-    title: 'Пользователи',
-    icon: 'mdi-account-group',
-    color: 'pink',
-    count: 12
-  }
-])
-
-// Mock data
-const mockData = {
-  requirement_types: [
-    { id: 1, name: 'Functional', code: 'FUNC', description: 'Функциональное требование', active: true },
-    { id: 2, name: 'Non-Functional', code: 'NFUNC', description: 'Нефункциональное требование', active: true },
-    { id: 3, name: 'Technical', code: 'TECH', description: 'Техническое требование', active: true },
-    { id: 4, name: 'Performance', code: 'PERF', description: 'Требование к производительности', active: true },
-    { id: 5, name: 'Safety', code: 'SAFE', description: 'Требование безопасности', active: true }
-  ],
-  priorities: [
-    { id: 1, name: 'Critical', code: 'CRIT', color: 'red', description: 'Критический приоритет', active: true },
-    { id: 2, name: 'High', code: 'HIGH', color: 'orange', description: 'Высокий приоритет', active: true },
-    { id: 3, name: 'Medium', code: 'MED', color: 'blue', description: 'Средний приоритет', active: true },
-    { id: 4, name: 'Low', code: 'LOW', color: 'grey', description: 'Низкий приоритет', active: true }
-  ],
-  statuses: [
-    { id: 1, name: 'Draft', description: 'Черновик', active: true },
-    { id: 2, name: 'In Review', description: 'На проверке', active: true },
-    { id: 3, name: 'Approved', description: 'Утверждено', active: true },
-    { id: 4, name: 'Implemented', description: 'Реализовано', active: true },
-    { id: 5, name: 'Verified', description: 'Проверено', active: true },
-    { id: 6, name: 'Rejected', description: 'Отклонено', active: true }
-  ],
-  users: [
-    { id: 1, name: 'Иванов Иван', email: 'ivanov@example.com', role: 'Менеджер требований', active: true },
-    { id: 2, name: 'Петров Пётр', email: 'petrov@example.com', role: 'Пользователь', active: true },
-    { id: 3, name: 'Сидоров Сидор', email: 'sidorov@example.com', role: 'Пользователь', active: true },
-    { id: 4, name: 'Козлова Мария', email: 'kozlova@example.com', role: 'Менеджер требований', active: true },
-    { id: 5, name: 'Смирнов Алексей', email: 'smirnov@example.com', role: 'Пользователь', active: true }
-  ]
-}
-
-const selectedDict = ref(null)
-const showAddDialog = ref(false)
-const editingItem = ref(null)
-const formData = ref({
-  name: '',
-  code: '',
-  description: '',
-  color: '',
-  active: true
-})
-
-const tableHeaders = computed(() => {
-  if (!selectedDict.value) return []
-  
-  const baseHeaders = [
-    { title: 'Название', key: 'name', sortable: true },
-    { title: 'Описание', key: 'description', sortable: false }
-  ]
-
-  if (selectedDict.value.id === 'requirement_types' || selectedDict.value.id === 'priorities') {
-    baseHeaders.splice(1, 0, { title: 'Код', key: 'code', sortable: true })
-  }
-
-  if (selectedDict.value.id === 'priorities') {
-    baseHeaders[0] = { title: 'Название', key: 'color', sortable: true }
-  }
-
-  if (selectedDict.value.id === 'users') {
-    baseHeaders.splice(1, 0, { title: 'Email', key: 'email', sortable: true })
-    baseHeaders.splice(2, 0, { title: 'Роль', key: 'role', sortable: true })
-  }
-
-  baseHeaders.push({ title: 'Статус', key: 'active', sortable: true })
-  baseHeaders.push({ title: 'Действия', key: 'actions', sortable: false, align: 'end' })
-
-  return baseHeaders
-})
-
-const selectDictionary = (dict) => {
-  selectedDict.value = dict
-}
-
-const getCurrentItems = () => {
-  if (!selectedDict.value) return []
-  return mockData[selectedDict.value.id] || []
-}
 
 const notifications = useNotificationsStore()
 
-const editItem = (item) => {
-  editingItem.value = item
-  formData.value = { ...item }
+const dictionaries = ref([
+  { id: 'requirement_types', title: 'Типы требований',         icon: 'mdi-shape',         color: 'blue',   count: 0 },
+  { id: 'priorities',        title: 'Приоритеты',              icon: 'mdi-flag',          color: 'orange', count: 0 },
+  { id: 'statuses',          title: 'Статусы жизненного цикла', icon: 'mdi-traffic-light', color: 'green',  count: 0 },
+])
+
+const colorOptions = [
+  { label: 'Красный',     value: 'red' },
+  { label: 'Оранжевый',   value: 'orange' },
+  { label: 'Синий',       value: 'blue' },
+  { label: 'Голубой',     value: 'cyan' },
+  { label: 'Зелёный',     value: 'green' },
+  { label: 'Бирюзовый',   value: 'teal' },
+  { label: 'Фиолетовый',  value: 'purple' },
+  { label: 'Коричневый',  value: 'brown' },
+  { label: 'Серый',       value: 'grey' },
+  { label: 'Лаймовый',    value: 'lime-darken-2' },
+]
+
+const selectedDict   = ref(null)
+const currentItems   = ref([])
+const loadingItems   = ref(false)
+const showAddDialog  = ref(false)
+const showDeleteDialog = ref(false)
+const editingItem    = ref(null)
+const deletingItem   = ref(null)
+const saving         = ref(false)
+const deleting       = ref(false)
+
+const emptyForm = () => ({ name: '', code: '', description: '', color: '', sort_order: 0, is_active: true })
+const formData = ref(emptyForm())
+
+const tableHeaders = computed(() => {
+  if (!selectedDict.value) return []
+
+  const cols = [
+    { title: 'Название',  key: 'name',        sortable: true  },
+    { title: 'Описание',  key: 'description', sortable: false },
+  ]
+
+  if (selectedDict.value.id !== 'statuses') {
+    cols.splice(1, 0, { title: 'Код', key: 'code', sortable: true })
+  }
+
+  cols.push({ title: 'Статус',    key: 'is_active',  sortable: true })
+  cols.push({ title: 'Порядок',   key: 'sort_order', sortable: true })
+  cols.push({ title: 'Действия',  key: 'actions',    sortable: false, align: 'end' })
+
+  return cols
+})
+
+async function loadItems(dict) {
+  loadingItems.value = true
+  try {
+    const data = await api.get(`/api/dictionaries/${dict.id}`)
+    currentItems.value = data.data
+    // update count badge
+    const found = dictionaries.value.find(d => d.id === dict.id)
+    if (found) found.count = data.data.length
+  } catch (e) {
+    notifications.notifyError(`Не удалось загрузить справочник: ${e.message}`)
+  } finally {
+    loadingItems.value = false
+  }
+}
+
+async function selectDictionary(dict) {
+  selectedDict.value = dict
+  await loadItems(dict)
+}
+
+function openAddDialog() {
+  editingItem.value = null
+  formData.value = emptyForm()
   showAddDialog.value = true
 }
 
-const deleteItem = (item) => {
-  notifications.notifyInfo(`Удаление "${item.name}" временно недоступно`)
+function editItem(item) {
+  editingItem.value = item
+  formData.value = {
+    name: item.name,
+    code: item.code || '',
+    description: item.description || '',
+    color: item.color || '',
+    sort_order: item.sort_order ?? 0,
+    is_active: item.is_active,
+  }
+  showAddDialog.value = true
 }
 
-const saveItem = () => {
-  notifications.notifyInfo('Редактирование справочников временно недоступно')
-  showAddDialog.value = false
-  formData.value = { name: '', code: '', description: '', color: '', active: true }
-  editingItem.value = null
+async function saveItem() {
+  if (!formData.value.name.trim()) {
+    notifications.notifyError('Поле «Название» обязательно')
+    return
+  }
+  saving.value = true
+  try {
+    const payload = { ...formData.value }
+    if (editingItem.value) {
+      await api.put(`/api/dictionaries/${selectedDict.value.id}/${editingItem.value.id}`, payload)
+      notifications.notifySuccess('Запись обновлена')
+    } else {
+      await api.post(`/api/dictionaries/${selectedDict.value.id}`, payload)
+      notifications.notifySuccess('Запись добавлена')
+    }
+    showAddDialog.value = false
+    await loadItems(selectedDict.value)
+  } catch (e) {
+    notifications.notifyError(`Ошибка сохранения: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    saving.value = false
+  }
+}
+
+function confirmDelete(item) {
+  deletingItem.value = item
+  showDeleteDialog.value = true
+}
+
+async function deleteItem() {
+  if (!deletingItem.value) return
+  deleting.value = true
+  try {
+    await api.delete(`/api/dictionaries/${selectedDict.value.id}/${deletingItem.value.id}`)
+    notifications.notifySuccess(`«${deletingItem.value.name}» удалено`)
+    showDeleteDialog.value = false
+    await loadItems(selectedDict.value)
+  } catch (e) {
+    notifications.notifyError(`Ошибка удаления: ${e.response?.data?.detail || e.message}`)
+  } finally {
+    deleting.value = false
+    deletingItem.value = null
+  }
 }
 </script>
 

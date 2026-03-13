@@ -21,6 +21,7 @@ from src.database.models import (
     CoverageMetrics,
     User,
     Comment,
+    DictionaryItem,
 )
 from src.models import RequirementType
 
@@ -532,6 +533,8 @@ def edit_requirement(
     edited_text: str,
     reason: Optional[str] = None,
     edited_by: Optional[str] = None,
+    req_type: Optional[str] = None,
+    priority: Optional[str] = None,
 ) -> Optional[Requirement]:
     """Edit a requirement (mark as modified).
     
@@ -555,6 +558,10 @@ def edit_requirement(
     db_requirement.edit_reason = reason
     db_requirement.edited_by = edited_by
     db_requirement.edited_at = datetime.now()
+    if req_type is not None:
+        db_requirement.type = req_type
+    if priority is not None:
+        db_requirement.priority = priority
     
     db.commit()
     db.refresh(db_requirement)
@@ -705,4 +712,99 @@ def delete_comment(db: Session, comment_id: int, user_id: int) -> bool:
     db.delete(comment)
     db.commit()
     return True
+
+
+# ========== Dictionary CRUD ==========
+
+VALID_DICT_TYPES = {"requirement_types", "priorities", "statuses"}
+
+
+def get_dictionary_items(db: Session, dict_type: str) -> List[DictionaryItem]:
+    """Get all items for a given dictionary type, ordered by sort_order."""
+    return (
+        db.query(DictionaryItem)
+        .filter(DictionaryItem.dict_type == dict_type)
+        .order_by(DictionaryItem.sort_order.asc(), DictionaryItem.id.asc())
+        .all()
+    )
+
+
+def get_dictionary_item(db: Session, item_id: int) -> Optional[DictionaryItem]:
+    return db.query(DictionaryItem).filter(DictionaryItem.id == item_id).first()
+
+
+def create_dictionary_item(db: Session, dict_type: str, data: Dict[str, Any]) -> DictionaryItem:
+    item = DictionaryItem(
+        dict_type=dict_type,
+        code=data.get("code"),
+        name=data["name"],
+        description=data.get("description"),
+        color=data.get("color"),
+        sort_order=data.get("sort_order", 0),
+        is_active=data.get("is_active", True),
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def update_dictionary_item(db: Session, item_id: int, data: Dict[str, Any]) -> Optional[DictionaryItem]:
+    item = db.query(DictionaryItem).filter(DictionaryItem.id == item_id).first()
+    if not item:
+        return None
+    for field in ("code", "name", "description", "color", "sort_order", "is_active"):
+        if field in data:
+            setattr(item, field, data[field])
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def delete_dictionary_item(db: Session, item_id: int) -> bool:
+    item = db.query(DictionaryItem).filter(DictionaryItem.id == item_id).first()
+    if not item:
+        return False
+    db.delete(item)
+    db.commit()
+    return True
+
+
+def seed_dictionary_defaults(db: Session) -> None:
+    """Populate dictionaries with default values if they are empty."""
+    defaults = {
+        "requirement_types": [
+            {"code": "Supply",         "name": "Supply",         "description": "Состав поставки, перечень оборудования", "color": "blue-darken-1", "sort_order": 1},
+            {"code": "Technical",      "name": "Technical",      "description": "Технические параметры и характеристики",  "color": "cyan-darken-1",  "sort_order": 2},
+            {"code": "Functional",     "name": "Functional",     "description": "Функциональное поведение системы",        "color": "green-darken-1", "sort_order": 3},
+            {"code": "Performance",    "name": "Performance",    "description": "Производительность и метрики",            "color": "teal-darken-1",  "sort_order": 4},
+            {"code": "Safety",         "name": "Safety",         "description": "Безопасность и защита",                  "color": "red-darken-1",   "sort_order": 5},
+            {"code": "Documentation",  "name": "Documentation",  "description": "Документирование и отчётность",          "color": "brown",          "sort_order": 6},
+            {"code": "Interface",      "name": "Interface",      "description": "Интерфейсы и протоколы",                 "color": "purple",         "sort_order": 7},
+            {"code": "Constraint",     "name": "Constraint",     "description": "Ограничения и граничные условия",        "color": "orange-darken-1","sort_order": 8},
+            {"code": "Process",        "name": "Process",        "description": "Процессы и рабочие процедуры",           "color": "lime-darken-2",  "sort_order": 9},
+            {"code": "Unknown",        "name": "Unknown",        "description": "Тип не определён",                      "color": "grey",           "sort_order": 10},
+        ],
+        "priorities": [
+            {"code": "Mandatory",    "name": "Mandatory",    "description": "Обязательное требование",    "color": "red",    "sort_order": 1},
+            {"code": "Recommended",  "name": "Recommended",  "description": "Рекомендуемое требование",  "color": "orange", "sort_order": 2},
+            {"code": "Optional",     "name": "Optional",     "description": "Необязательное требование", "color": "blue",   "sort_order": 3},
+            {"code": "Unknown",      "name": "Unknown",      "description": "Приоритет не определён",    "color": "grey",   "sort_order": 4},
+        ],
+        "statuses": [
+            {"code": "pending",     "name": "На рассмотрении", "description": "Ожидает проверки менеджером",  "color": "orange", "sort_order": 1},
+            {"code": "accepted",    "name": "Принято",         "description": "Требование подтверждено",      "color": "green",  "sort_order": 2},
+            {"code": "rejected",    "name": "Отклонено",       "description": "Требование отклонено",         "color": "red",    "sort_order": 3},
+            {"code": "modified",    "name": "Изменено",        "description": "Требование отредактировано",   "color": "blue",   "sort_order": 4},
+            {"code": "in_progress", "name": "В работе",        "description": "Исполнитель приступил",        "color": "cyan",   "sort_order": 5},
+            {"code": "done",        "name": "Выполнено",       "description": "Исполнитель завершил",         "color": "teal",   "sort_order": 6},
+            {"code": "blocked",     "name": "Заблокировано",   "description": "Выполнение заблокировано",     "color": "grey",   "sort_order": 7},
+        ],
+    }
+    for dict_type, items in defaults.items():
+        existing = db.query(DictionaryItem).filter(DictionaryItem.dict_type == dict_type).count()
+        if existing == 0:
+            for item_data in items:
+                db.add(DictionaryItem(dict_type=dict_type, **item_data))
+    db.commit()
 

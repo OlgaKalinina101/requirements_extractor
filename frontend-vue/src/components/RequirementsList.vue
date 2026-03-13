@@ -6,7 +6,7 @@
       :requirement="requirement"
       @accept="$emit('accept', requirement.id)"
       @reject="$emit('reject', requirement.id, $event)"
-      @edit="$emit('edit', requirement.id, $event.text, $event.reason)"
+      @edit="$emit('edit', requirement.id, $event.text, $event.reason, $event.type, $event.priority)"
       @view-page="$emit('view-page', $event)"
       @assigned="$emit('assigned', $event)"
       @status-changed="$emit('status-changed', $event)"

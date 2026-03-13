@@ -1,32 +1,19 @@
 <template>
   <v-card
     class="mb-4 requirement-card"
-    :color="getStatusColor(requirement.status)"
+    :color="cardBgColor"
     @click="handleCardClick"
   >
     <v-card-title class="d-flex align-center flex-wrap gap-1">
       <v-chip size="small" class="mr-2">{{ requirement.requirement_id }}</v-chip>
       <v-spacer></v-spacer>
 
-      <!-- Execution status chip (in_progress / done / blocked) -->
       <v-chip
-        v-if="isExecutionStatus(requirement.status)"
-        :color="getStatusChipColor(requirement.status)"
-        size="small"
-        variant="flat"
-        class="mr-1"
-      >
-        {{ getStatusText(requirement.status) }}
-      </v-chip>
-
-      <!-- Review status chip -->
-      <v-chip
-        v-else
-        :color="getStatusChipColor(requirement.status)"
+        :color="dicts.statusColor(requirement.status)"
         size="small"
         variant="flat"
       >
-        {{ getStatusText(requirement.status) }}
+        {{ dicts.statusName(requirement.status) }}
       </v-chip>
     </v-card-title>
 
@@ -44,8 +31,12 @@
       </v-list>
 
       <v-chip-group>
-        <v-chip size="small" v-if="requirement.type">{{ translateType(requirement.type) }}</v-chip>
-        <v-chip size="small" v-if="requirement.priority">{{ translatePriority(requirement.priority) }}</v-chip>
+        <v-chip size="small" :color="dicts.typeColor(requirement.type)" variant="tonal" v-if="requirement.type">
+          {{ dicts.typeName(requirement.type) }}
+        </v-chip>
+        <v-chip size="small" :color="dicts.priorityColor(requirement.priority)" variant="tonal" v-if="requirement.priority">
+          {{ dicts.priorityName(requirement.priority) }}
+        </v-chip>
         <v-chip
           size="small"
           v-if="requirement.page_number"
@@ -153,17 +144,17 @@
             v-bind="menuProps"
             size="small"
             :variant="isExecutionStatus(requirement.status) ? 'tonal' : 'outlined'"
-            :color="isExecutionStatus(requirement.status) ? getStatusChipColor(requirement.status) : 'default'"
+            :color="isExecutionStatus(requirement.status) ? dicts.statusColor(requirement.status) : 'default'"
             prepend-icon="mdi-progress-check"
             @click.stop
           >
-            {{ isExecutionStatus(requirement.status) ? getStatusText(requirement.status) : 'Статус работы' }}
+            {{ isExecutionStatus(requirement.status) ? dicts.statusName(requirement.status) : 'Статус работы' }}
           </v-btn>
         </template>
         <v-list density="compact" min-width="180">
           <v-list-subheader>Статус выполнения</v-list-subheader>
           <v-list-item
-            v-for="s in executionStatuses"
+            v-for="s in dicts.executionStatusOptions"
             :key="s.value"
             :title="s.label"
             :prepend-icon="requirement.status === s.value ? 'mdi-check' : s.icon"
@@ -218,7 +209,31 @@
           </ul>
         </div>
         <v-textarea v-model="editedText" label="Ваша версия" rows="4" required />
-        <v-textarea v-model="editReason" label="Причина изменения (опционально)" rows="2" class="mt-4" />
+
+        <v-row class="mt-3">
+          <v-col cols="6">
+            <v-select
+              v-model="editType"
+              :items="dicts.typeOptions"
+              label="Тип"
+              density="compact"
+              variant="outlined"
+              clearable
+            />
+          </v-col>
+          <v-col cols="6">
+            <v-select
+              v-model="editPriority"
+              :items="dicts.priorityOptions"
+              label="Приоритет"
+              density="compact"
+              variant="outlined"
+              clearable
+            />
+          </v-col>
+        </v-row>
+
+        <v-textarea v-model="editReason" label="Причина изменения (опционально)" rows="2" class="mt-2" />
       </v-card-text>
       <v-card-actions>
         <v-spacer />
@@ -232,13 +247,13 @@
 <script setup>
 import { ref, watch, computed, inject } from 'vue'
 import { useRouter } from 'vue-router'
-import { useRequirementTranslations } from '@/composables/useRequirementTranslations'
 import { useAuthStore } from '@/stores/auth'
+import { useDictionariesStore } from '@/stores/dictionaries'
 import { requirementsApi } from '@/services/api'
 import { useNotificationsStore } from '@/stores/notifications'
 
-const { translateType, translatePriority } = useRequirementTranslations()
 const auth = useAuthStore()
+const dicts = useDictionariesStore()
 const notifications = useNotificationsStore()
 const router = useRouter()
 
@@ -256,6 +271,8 @@ const showEditDialog = ref(false)
 const rejectReason = ref('')
 const editedText = ref('')
 const editReason = ref('')
+const editType = ref('')
+const editPriority = ref('')
 
 watch(() => props.requirement, (newReq) => {
   if (newReq.subitems && newReq.subitems.length > 0) {
@@ -263,6 +280,8 @@ watch(() => props.requirement, (newReq) => {
   } else {
     editedText.value = newReq.text
   }
+  editType.value = newReq.type || ''
+  editPriority.value = newReq.priority || ''
 }, { immediate: true })
 
 // Resolve assignee name from injected users list
@@ -272,50 +291,20 @@ const assigneeName = computed(() => {
   return u ? u.label : `#${props.requirement.assignee_id}`
 })
 
-const executionStatuses = [
-  { value: 'in_progress', label: 'В работе', icon: 'mdi-progress-clock' },
-  { value: 'done', label: 'Выполнено', icon: 'mdi-check-circle' },
-  { value: 'blocked', label: 'Заблокировано', icon: 'mdi-alert-circle' },
-]
-
 const isExecutionStatus = (s) => ['in_progress', 'done', 'blocked'].includes(s)
 
-// User can change execution status if: they are the assignee, or manager/admin
 const canSetExecutionStatus = computed(() => {
   if (auth.isManager) return true
-  // Compare as numbers — assignee_id from API is int, user.id from JWT is int
   return Number(props.requirement.assignee_id) === Number(auth.user?.id)
 })
 
-const getStatusColor = (status) => ({
-  pending: 'grey-lighten-5',
-  accepted: 'green-lighten-5',
-  rejected: 'red-lighten-5',
-  modified: 'blue-lighten-5',
-  in_progress: 'orange-lighten-5',
-  done: 'teal-lighten-5',
-  blocked: 'deep-orange-lighten-5',
-}[status] || '')
-
-const getStatusChipColor = (status) => ({
-  pending: 'grey',
-  accepted: 'green',
-  rejected: 'red',
-  modified: 'blue',
-  in_progress: 'orange',
-  done: 'teal',
-  blocked: 'deep-orange',
-}[status] || 'grey')
-
-const getStatusText = (status) => ({
-  pending: 'На рассмотрении',
-  accepted: 'Принято',
-  rejected: 'Отклонено',
-  modified: 'Изменено',
-  in_progress: 'В работе',
-  done: 'Выполнено',
-  blocked: 'Заблокировано',
-}[status] || status)
+// Soft background tint derived from the status color in the dictionary
+const cardBgColor = computed(() => {
+  const base = dicts.statusColor(props.requirement.status)
+  if (!base || base === 'grey') return 'grey-lighten-5'
+  // Append lighten-5 to any plain color name for a subtle tint
+  return base.includes('-') ? base : `${base}-lighten-5`
+})
 
 async function assignUser(userId) {
   try {
@@ -331,7 +320,7 @@ async function changeExecutionStatus(status) {
   try {
     await requirementsApi.setStatus(props.requirement.id, status)
     emit('status-changed', { requirementId: props.requirement.id, status })
-    notifications.notifySuccess(`Статус: ${getStatusText(status)}`)
+    notifications.notifySuccess(`Статус: ${dicts.statusName(status)}`)
   } catch (e) {
     notifications.notifyError(e.response?.data?.detail || 'Ошибка смены статуса')
   }
@@ -345,7 +334,12 @@ const handleReject = () => {
 
 const handleEdit = () => {
   if (!editedText.value.trim()) return
-  emit('edit', { text: editedText.value, reason: editReason.value || null })
+  emit('edit', {
+    text: editedText.value,
+    reason: editReason.value || null,
+    type: editType.value || null,
+    priority: editPriority.value || null,
+  })
   showEditDialog.value = false
   editReason.value = ''
 }

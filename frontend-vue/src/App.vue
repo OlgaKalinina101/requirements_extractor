@@ -77,14 +77,22 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
+import { useDictionariesStore } from '@/stores/dictionaries'
 
 const router = useRouter()
 const notifications = useNotificationsStore()
 const auth = useAuthStore()
+const dicts = useDictionariesStore()
+
+// Load dictionaries once when user is authenticated
+watch(() => auth.isAuthenticated, (val) => {
+  if (val) dicts.loadAll()
+  else dicts.reset()
+}, { immediate: true })
 
 const roleColor = computed(() => {
   if (auth.role === 'admin') return 'error'
