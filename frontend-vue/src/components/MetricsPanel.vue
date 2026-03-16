@@ -79,19 +79,32 @@
           </div>
           <v-chip-group column>
             <v-chip
-              v-for="page in metrics.skipped_pages.slice(0, 10)"
+              v-for="page in visibleSkippedPages"
               :key="page"
               size="x-small"
               variant="outlined"
+              class="chip-clickable"
+              @click="goToPage(page)"
             >
               {{ page }}
             </v-chip>
             <v-chip
-              v-if="metrics.skipped_pages.length > 10"
+              v-if="metrics.skipped_pages.length > 10 && !expandedSkipped"
               size="x-small"
               variant="text"
+              class="chip-clickable"
+              @click="expandedSkipped = true"
             >
               +{{ metrics.skipped_pages.length - 10 }} ещё
+            </v-chip>
+            <v-chip
+              v-else-if="metrics.skipped_pages.length > 10 && expandedSkipped"
+              size="x-small"
+              variant="tonal"
+              class="chip-clickable"
+              @click="expandedSkipped = false"
+            >
+              Свернуть
             </v-chip>
           </v-chip-group>
         </div>
@@ -133,9 +146,22 @@ const props = defineProps({
   }
 })
 
+const emit = defineEmits(['view-page'])
+
 const loading = ref(false)
 const error = ref(null)
 const metrics = ref(null)
+const expandedSkipped = ref(false)
+
+const visibleSkippedPages = computed(() => {
+  if (!metrics.value?.skipped_pages) return []
+  const pages = metrics.value.skipped_pages
+  return expandedSkipped.value ? pages : pages.slice(0, 10)
+})
+
+const goToPage = (page) => {
+  emit('view-page', page)
+}
 
 const sortedRequirementsByType = computed(() => {
   if (!metrics.value?.requirements_by_type) return {}
@@ -197,6 +223,7 @@ const refreshMetrics = () => {
 }
 
 watch(() => props.documentId, () => {
+  expandedSkipped.value = false
   fetchMetrics()
 })
 
@@ -208,5 +235,12 @@ onMounted(() => {
 <style scoped>
 .v-progress-linear {
   border-radius: 4px;
+}
+
+.chip-clickable {
+  cursor: pointer;
+}
+.chip-clickable:hover {
+  opacity: 0.85;
 }
 </style>

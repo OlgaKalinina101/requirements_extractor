@@ -8,6 +8,7 @@ encoding issues on Windows with Russian locale.
 """
 
 import os
+from contextlib import contextmanager
 from typing import Generator
 
 from sqlalchemy import create_engine
@@ -47,10 +48,20 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db() -> Generator[Session, None, None]:
     """Get database session.
-    
+
     Yields:
         Database session. Automatically closes after use.
     """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@contextmanager
+def db_session() -> Generator[Session, None, None]:
+    """Context manager that opens and properly closes a DB session."""
     db = SessionLocal()
     try:
         yield db

@@ -1,9 +1,12 @@
 <template>
   <div>
-    <RequirementCard
+    <div
       v-for="requirement in requirements"
       :key="requirement.id"
-      :requirement="requirement"
+      :id="`req-${requirement.id}`"
+    >
+      <RequirementCard
+        :requirement="requirement"
       @accept="$emit('accept', requirement.id)"
       @reject="$emit('reject', requirement.id, $event)"
       @edit="$emit('edit', requirement.id, $event.text, $event.reason, $event.type, $event.priority)"
@@ -11,6 +14,7 @@
       @assigned="$emit('assigned', $event)"
       @status-changed="$emit('status-changed', $event)"
     />
+    </div>
   </div>
 </template>
 

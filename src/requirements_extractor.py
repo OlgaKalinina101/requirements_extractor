@@ -194,21 +194,29 @@ class RequirementsExtractor:
         # Extract physical page number (1-based, guaranteed correct!)
         page_number = page_obj["page_number"]
         page_text = page_obj["text"]
-        
-        if not page_text or len(page_text.strip()) < 50:
-            logger.debug(f"Page {page_number}: skipping (empty or too short)")
+        has_images = bool(
+            image_dir and page_number in self.page_image_metadata and self.page_image_metadata[page_number]
+        )
+        text_is_usable = page_text and len(page_text.strip()) >= 50
+
+        # Пропускаем только если нет ни текста, ни изображений
+        if not text_is_usable and not has_images:
+            logger.debug(f"Page {page_number}: skipping (empty text and no images)")
             if progress_callback:
                 progress_callback(page_number, total_pages, f"Page {page_number} skipped (empty)")
             return []
-        
-        logger.info(f"[PAGE {page_number}] Extracting from text ({len(page_text)} chars)")
-        
-        # Extract requirements from text
-        text_requirements = await self._async_extract_from_text_simple(
-            page_number,  # Physical page number (1-based, correct!)
-            page_text
-        )
-        
+
+        # Extract requirements from text (если текст достаточный)
+        text_requirements = []
+        if text_is_usable:
+            logger.info(f"[PAGE {page_number}] Extracting from text ({len(page_text)} chars)")
+            text_requirements = await self._async_extract_from_text_simple(
+                page_number,
+                page_text
+            )
+        elif has_images:
+            logger.info(f"[PAGE {page_number}] Text too short, extracting from images only")
+
         # Extract requirements from images on this page (PARALLEL)
         image_requirements = []
         # NOTE: image_metadata uses 1-based page numbers as keys

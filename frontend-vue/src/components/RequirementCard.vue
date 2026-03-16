@@ -18,11 +18,11 @@
     </v-card-title>
 
     <v-card-text>
-      <div class="text-body-1 mb-2">{{ requirement.text }}</div>
+      <div class="text-body-1 mb-2">{{ displayContent.intro }}</div>
 
       <!-- Subitems -->
-      <v-list v-if="requirement.subitems && requirement.subitems.length > 0" density="compact" class="ml-4 mt-2">
-        <v-list-item v-for="(item, index) in requirement.subitems" :key="index" class="subitem">
+      <v-list v-if="displayContent.subitems.length > 0" density="compact" class="ml-4 mt-2">
+        <v-list-item v-for="(item, index) in displayContent.subitems" :key="index" class="subitem">
           <template #prepend>
             <v-icon size="small" color="primary">mdi-circle-small</v-icon>
           </template>
@@ -75,7 +75,10 @@
             <v-divider class="my-2" />
             <div>
               <strong>Человек изменил на:</strong>
-              <div class="text-body-2 mt-1">{{ requirement.human_edited }}</div>
+              <div class="text-body-2 mt-1">{{ humanEditedDisplay.intro }}</div>
+              <ul v-if="humanEditedDisplay.subitems.length > 0" class="text-body-2 ml-4 mt-1">
+                <li v-for="(item, index) in humanEditedDisplay.subitems" :key="'human-' + index">{{ item }}</li>
+              </ul>
             </div>
             <div v-if="requirement.edit_reason" class="mt-2">
               <strong>Причина:</strong>
@@ -94,7 +97,7 @@
         size="small"
         variant="text"
         prepend-icon="mdi-comment-text-outline"
-        @click.stop="router.push(`/requirement/${requirement.id}`)"
+        @click.stop="goToDetail"
       >
         Подробнее и комментарии
       </v-btn>
@@ -251,6 +254,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useDictionariesStore } from '@/stores/dictionaries'
 import { requirementsApi } from '@/services/api'
 import { useNotificationsStore } from '@/stores/notifications'
+import { parseRequirementWithSubitems } from '@/utils/requirementText'
 
 const auth = useAuthStore()
 const dicts = useDictionariesStore()
@@ -259,6 +263,7 @@ const router = useRouter()
 
 // Users list injected from parent ReviewView
 const users = inject('users', ref([]))
+const documentId = inject('documentId', ref(null))
 
 const props = defineProps({
   requirement: { type: Object, required: true },
@@ -275,7 +280,9 @@ const editType = ref('')
 const editPriority = ref('')
 
 watch(() => props.requirement, (newReq) => {
-  if (newReq.subitems && newReq.subitems.length > 0) {
+  if (newReq.status === 'modified' && newReq.human_edited) {
+    editedText.value = newReq.human_edited
+  } else if (newReq.subitems && newReq.subitems.length > 0) {
     editedText.value = newReq.text + '\n' + newReq.subitems.map(item => '- ' + item).join('\n')
   } else {
     editedText.value = newReq.text
@@ -283,6 +290,25 @@ watch(() => props.requirement, (newReq) => {
   editType.value = newReq.type || ''
   editPriority.value = newReq.priority || ''
 }, { immediate: true })
+
+// Display content: when modified + human_edited, parse it; else use text + subitems
+const displayContent = computed(() => {
+  const r = props.requirement
+  if (r.status === 'modified' && r.human_edited) {
+    return parseRequirementWithSubitems(r.human_edited)
+  }
+  return {
+    intro: r.text || '',
+    subitems: r.subitems || []
+  }
+})
+
+// Parsed human_edited for history panel
+const humanEditedDisplay = computed(() => {
+  const r = props.requirement
+  if (!r.human_edited) return { intro: '', subitems: [] }
+  return parseRequirementWithSubitems(r.human_edited)
+})
 
 // Resolve assignee name from injected users list
 const assigneeName = computed(() => {
@@ -342,6 +368,15 @@ const handleEdit = () => {
   })
   showEditDialog.value = false
   editReason.value = ''
+}
+
+function goToDetail() {
+  const docId = documentId?.value
+  if (docId) {
+    router.push({ path: `/requirement/${props.requirement.id}`, query: { from: docId } })
+  } else {
+    router.push(`/requirement/${props.requirement.id}`)
+  }
 }
 
 const handleCardClick = (event) => {

@@ -18,6 +18,7 @@ Features:
 
 # Standard library imports
 import os
+import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -132,69 +133,54 @@ class PDFProcessor:
                 "text": text
             })
             
-            # Process images for this chunk
-            page_images = []
-            if self.config.write_images and "images" in chunk_data:
-                images_info = chunk_data.get("images", [])
-                pdf_name = pdf_path.stem
-                page_idx_0based = page_number - 1  # pymupdf4llm names image files with 0-based index
-                
-                for img_idx, img_info in enumerate(images_info):
-                    image_ext = self.config.image_format
-                    old_path = None
-                    
-                    # Try to find the image file
-                    for ext in ['png', 'jpg', 'jpeg']:
-                        candidate = image_dir / f"{pdf_name}-{page_idx_0based}-{img_idx}.{ext}"
-                        if candidate.exists():
-                            old_path = candidate
-                            image_ext = ext
-                            break
-                    
-                    if not old_path:
-                        for ext in ['png', 'jpg', 'jpeg']:
-                            for pattern in [
-                                f"{pdf_name}-p{page_idx_0based}-img{img_idx}.{ext}",
-                                f"{pdf_name}-p{page_number}-img{img_idx}.{ext}",
-                            ]:
-                                candidate = image_dir / pattern
-                                if candidate.exists():
-                                    old_path = candidate
-                                    image_ext = ext
-                                    break
-                            if old_path:
-                                break
-                    
-                    # Glob fallback
-                    if not old_path:
-                        for pat in [f"*{page_idx_0based}*{img_idx}*", f"*{page_idx_0based}*"]:
-                            found = list(image_dir.glob(pat))
-                            if found:
-                                old_path = found[0]
-                                image_ext = old_path.suffix.lstrip('.')
-                                break
-                    
-                    if old_path and old_path.exists():
-                        new_filename = f"page_{page_number}_image_{img_idx + 1}.{image_ext}"
-                        new_path = image_dir / new_filename
-                        try:
-                            old_path.rename(new_path)
-                            page_images.append({
-                                "filename": new_filename,
-                                "path": str(new_path),
-                                "page_number": page_number,
-                                "image_index": img_idx + 1,
-                                "width": img_info.get("width"),
-                                "height": img_info.get("height"),
-                                "ext": image_ext
-                            })
-                        except Exception as e:
-                            logger.warning(f"Failed to rename image {old_path.name}: {e}")
-            
-            image_results[page_number] = page_images
+            image_results[page_number] = []
             
             if progress_callback:
                 progress_callback(chunk_idx + 1, total_pages)
+        
+        # Discover images written to disk by pymupdf4llm.
+        # File naming convention: {pdf_stem}-{page_0based:04d}-{img_idx:02d}.{ext}
+        if self.config.write_images:
+            # pymupdf4llm uses the full filename (with extension) as prefix
+            pdf_name = pdf_path.name
+            all_image_files = sorted(image_dir.glob(f"{pdf_name}-*"))
+            logger.info(f"Found {len(all_image_files)} image files on disk")
+            
+            # Pattern: stem-PPPP-II.ext  (4-digit page, 2-digit index)
+            # Also handle older format: stem-P-I.ext (variable digits)
+            pattern = re.compile(
+                rf"^{re.escape(pdf_name)}-0*(\d+)-0*(\d+)\.\w+$"
+            )
+            
+            for img_file in all_image_files:
+                m = pattern.match(img_file.name)
+                if not m:
+                    continue
+                # pymupdf4llm uses 1-based page numbers in filenames
+                page_number = int(m.group(1))
+                img_idx = int(m.group(2))
+                image_ext = img_file.suffix.lstrip('.')
+                
+                new_filename = f"page_{page_number}_image_{img_idx + 1}.{image_ext}"
+                new_path = image_dir / new_filename
+                try:
+                    img_file.rename(new_path)
+                    if page_number not in image_results:
+                        image_results[page_number] = []
+                    image_results[page_number].append({
+                        "filename": new_filename,
+                        "path": str(new_path),
+                        "page_number": page_number,
+                        "image_index": img_idx + 1,
+                        "ext": image_ext
+                    })
+                    logger.debug(f"Image: {img_file.name} -> {new_filename} (page {page_number})")
+                except Exception as e:
+                    logger.warning(f"Failed to rename image {img_file.name}: {e}")
+            
+            img_pages = {p for p, imgs in image_results.items() if imgs}
+            total_imgs = sum(len(imgs) for imgs in image_results.values())
+            logger.info(f"Mapped {total_imgs} images across {len(img_pages)} pages")
         
         successful = sum(1 for p in pages if p["text"])
         total_images = sum(len(imgs) for imgs in image_results.values())

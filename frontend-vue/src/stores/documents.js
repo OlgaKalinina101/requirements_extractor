@@ -43,7 +43,13 @@ export const useDocumentsStore = defineStore('documents', {
       this.error = null
       try {
         const response = await documentsApi.uploadAndExtract(file, model, generateWord, projectId)
-        await this.fetchDocuments(projectId)
+        // Обновляем список документов; при 401 (истёк токен) не редиректим — показываем результат
+        try {
+          const docsRes = await documentsApi.getAll(projectId, { skipAuthRedirect: true })
+          this.documents = docsRes.data.documents || []
+        } catch {
+          // Игнорируем ошибку — результат извлечения уже есть
+        }
         return response.data
       } catch (error) {
         this.error = error.message

@@ -50,7 +50,8 @@
                 </v-chip>
               </v-card-title>
               
-              <v-card-text class="pa-2 requirements-scroll-container" style="flex: 1 1 auto; overflow-y: auto; height: 0;">
+              <v-card-text class="pa-2 d-flex flex-column" style="flex: 1 1 auto; height: 0; min-height: 0;">
+                <div ref="requirementsScrollContainer" class="requirements-scroll-container flex-grow-1" style="overflow-y: auto; min-height: 0;">
                 <div v-if="requirementsStore.loading" class="text-center py-8">
                   <v-progress-circular indeterminate color="primary"></v-progress-circular>
                 </div>
@@ -73,6 +74,7 @@
                   @assigned="handleAssigned"
                   @status-changed="handleStatusChanged"
                 />
+                </div>
               </v-card-text>
             </v-card>
           </v-col>
@@ -165,6 +167,7 @@
               v-if="documentsStore.currentDocument"
               :document-id="documentsStore.currentDocument.id"
               class="flex-grow-1"
+              @view-page="jumpToPdfPage"
             />
           </v-col>
         </v-row>
@@ -174,8 +177,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, provide } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, watch, provide, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useDocumentsStore } from '../stores/documents'
 import { useRequirementsStore } from '../stores/requirements'
 import RequirementsList from '../components/RequirementsList.vue'
@@ -186,12 +189,14 @@ import { useDictionariesStore } from '@/stores/dictionaries'
 import { usersApi } from '@/services/api'
 
 const route = useRoute()
+const router = useRouter()
 const documentsStore = useDocumentsStore()
 const requirementsStore = useRequirementsStore()
 const auth = useAuthStore()
 const dicts = useDictionariesStore()
 
 const pdfViewer = ref(null)
+const requirementsScrollContainer = ref(null)
 const currentPdfPage = ref(1)
 const statusFilter = ref(null)
 const typeFilter = ref(null)
@@ -200,6 +205,7 @@ const onlyMine = ref(false)
 // Users list for assignee dropdowns in RequirementCard
 const users = ref([])
 provide('users', users)
+provide('documentId', computed(() => route.params.documentId))
 
 // Filter options come from the dictionaries store (loaded from DB)
 const statusOptions = computed(() => dicts.statusOptions)
@@ -259,7 +265,13 @@ const jumpToPdfPage = (pageNumber) => {
 }
 
 const onPdfPageChanged = (page) => { currentPdfPage.value = page }
-const onPdfLoaded = () => {}
+const pendingPdfPageOnLoad = ref(null)
+const onPdfLoaded = () => {
+  if (pendingPdfPageOnLoad.value && pdfViewer.value) {
+    pdfViewer.value.jumpToPage(pendingPdfPageOnLoad.value)
+    pendingPdfPageOnLoad.value = null
+  }
+}
 
 const loadData = async () => {
   const documentId = route.params.documentId
@@ -267,8 +279,33 @@ const loadData = async () => {
     try {
       await documentsStore.fetchDocument(documentId)
       await requirementsStore.fetchRequirements(documentId)
-      const firstRequirement = requirementsStore.filteredRequirements[0]
-      if (firstRequirement?.page_number) currentPdfPage.value = firstRequirement.page_number
+
+      const scrollToId = route.query.scrollTo
+      const scrollToPage = route.query.page ? parseInt(route.query.page, 10) : null
+      if (scrollToId && scrollToPage) {
+        currentPdfPage.value = scrollToPage
+      } else {
+        const firstRequirement = requirementsStore.filteredRequirements[0]
+        if (firstRequirement?.page_number) currentPdfPage.value = firstRequirement.page_number
+      }
+
+      if (scrollToId) {
+        if (scrollToPage) pendingPdfPageOnLoad.value = scrollToPage
+        await nextTick()
+        if (scrollToPage && pdfViewer.value) {
+          pdfViewer.value.jumpToPage(scrollToPage)
+          pendingPdfPageOnLoad.value = null
+        }
+        const container = requirementsScrollContainer.value ?? document.querySelector('.requirements-scroll-container')
+        const el = document.getElementById(`req-${scrollToId}`)
+        if (container && el) {
+          const containerRect = container.getBoundingClientRect()
+          const elRect = el.getBoundingClientRect()
+          const scrollTop = container.scrollTop + (elRect.top - containerRect.top)
+          container.scrollTo({ top: Math.max(0, scrollTop), behavior: 'smooth' })
+        }
+        router.replace({ path: route.path, query: {} })
+      }
     } catch { /* stores handle error */ }
   }
 }

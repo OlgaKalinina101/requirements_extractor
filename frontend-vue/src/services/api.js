@@ -18,13 +18,13 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// On 401 — clear token and redirect to /login
+// On 401 — clear token and redirect to /login (unless skipAuthRedirect)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Avoid redirect loop on the login page itself
-      if (!window.location.pathname.startsWith('/login')) {
+      const skipRedirect = error.config?.skipAuthRedirect === true
+      if (!skipRedirect && !window.location.pathname.startsWith('/login')) {
         localStorage.removeItem('token')
         localStorage.removeItem('user')
         window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`
@@ -61,9 +61,9 @@ export const projectsApi = {
 
 // Documents API
 export const documentsApi = {
-  getAll: (projectId = null) => {
+  getAll: (projectId = null, options = {}) => {
     const params = projectId ? { project_id: projectId } : {}
-    return api.get('/api/documents', { params })
+    return api.get('/api/documents', { params, ...options })
   },
   
   getById: (id) => api.get(`/api/documents/${id}`),

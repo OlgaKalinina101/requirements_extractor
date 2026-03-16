@@ -196,7 +196,6 @@ def load_from_env() -> ApplicationConfig:
     
     Environment variables:
         OPENROUTER_API_KEY: OpenRouter API key (required for openrouter provider)
-        DEEPSEEK_API_KEY: DeepSeek API key (required for deepseek provider)
         OPENROUTER_REFERER: Referer for OpenRouter
         OPENROUTER_TITLE: Title for OpenRouter
         PROVIDER: AI provider ("openrouter" or "deepseek")

@@ -1,8 +1,19 @@
 <template>
   <div>
-    <v-breadcrumbs :items="breadcrumbs" class="px-0 mb-2">
-      <template #divider><v-icon>mdi-chevron-right</v-icon></template>
-    </v-breadcrumbs>
+    <div class="d-flex align-center mb-2">
+      <v-btn
+        v-if="requirement?.document_id"
+        variant="text"
+        prepend-icon="mdi-arrow-left"
+        @click="goBack"
+        class="mr-2"
+      >
+        Назад
+      </v-btn>
+      <v-breadcrumbs :items="breadcrumbs" class="px-0">
+        <template #divider><v-icon>mdi-chevron-right</v-icon></template>
+      </v-breadcrumbs>
+    </div>
 
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
 
@@ -67,14 +78,14 @@
             <!-- Main text + subitems -->
             <div class="mb-4">
               <div class="text-subtitle-2 mb-1">Текст требования</div>
-              <div class="text-body-1">{{ requirement.text }}</div>
+              <div class="text-body-1">{{ requirementDisplayContent.intro }}</div>
               <v-list
-                v-if="requirement.subitems && requirement.subitems.length"
+                v-if="requirementDisplayContent.subitems.length"
                 density="compact"
                 class="ml-4 mt-2 pa-0"
               >
                 <v-list-item
-                  v-for="(item, i) in requirement.subitems"
+                  v-for="(item, i) in requirementDisplayContent.subitems"
                   :key="i"
                   class="subitem px-2 mb-1"
                 >
@@ -90,9 +101,15 @@
             <div v-if="requirement.human_edited" class="mb-4">
               <div class="text-subtitle-2 text-medium-emphasis mb-1">Исходный текст AI</div>
               <div class="text-body-2 text-medium-emphasis font-italic">{{ requirement.ai_suggested }}</div>
+              <ul v-if="requirement.subitems && requirement.subitems.length" class="text-body-2 text-medium-emphasis font-italic ml-4 mt-1">
+                <li v-for="(item, i) in requirement.subitems" :key="i">{{ item }}</li>
+              </ul>
               <v-divider class="my-2" />
               <div class="text-subtitle-2 mb-1">Отредактированный текст</div>
-              <div class="text-body-1">{{ requirement.human_edited }}</div>
+              <div class="text-body-1">{{ humanEditedParsed.intro }}</div>
+              <ul v-if="humanEditedParsed.subitems.length" class="text-body-1 ml-4 mt-1">
+                <li v-for="(item, i) in humanEditedParsed.subitems" :key="i">{{ item }}</li>
+              </ul>
               <div v-if="requirement.edit_reason" class="text-caption text-medium-emphasis mt-1">
                 Причина: {{ requirement.edit_reason }}
               </div>
@@ -257,6 +274,7 @@ import { requirementsApi, usersApi } from '@/services/api'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { useDictionariesStore } from '@/stores/dictionaries'
+import { parseRequirementWithSubitems } from '@/utils/requirementText'
 
 const router = useRouter()
 const route = useRoute()
@@ -281,6 +299,37 @@ const breadcrumbs = computed(() => [
   { title: 'Проекты', to: '/', disabled: false },
   { title: requirement.value?.requirement_id || '...', disabled: true }
 ])
+
+function goBack() {
+  const r = requirement.value
+  if (r?.document_id) {
+    const query = { scrollTo: r.id }
+    if (r.page_number) query.page = r.page_number
+    router.push({ path: `/review/${r.document_id}`, query })
+  } else {
+    router.push('/')
+  }
+}
+
+// Display content: when human_edited exists, parse it; else use text + subitems
+const requirementDisplayContent = computed(() => {
+  const r = requirement.value
+  if (!r) return { intro: '', subitems: [] }
+  if (r.human_edited) {
+    return parseRequirementWithSubitems(r.human_edited)
+  }
+  return {
+    intro: r.text || '',
+    subitems: r.subitems || []
+  }
+})
+
+// Parsed human_edited for the "Отредактированный текст" block
+const humanEditedParsed = computed(() => {
+  const r = requirement.value
+  if (!r?.human_edited) return { intro: '', subitems: [] }
+  return parseRequirementWithSubitems(r.human_edited)
+})
 
 const auditLog = computed(() => {
   if (!requirement.value) return []

@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from src.export.utils import group_requirements_by_sections
+
 logger = logging.getLogger("api")
 
 
@@ -146,10 +148,9 @@ def generate_word_from_db(document, sections: List, all_requirements: List, metr
         doc.add_paragraph("")
 
     doc.add_heading("Требования по разделам", 1)
-    assigned_ids = set()
+    section_reqs_map, orphans = group_requirements_by_sections(sections, all_requirements)
     for section in sections:
-        section_reqs = [r for r in all_requirements if r.section_id == section.id]
-        assigned_ids.update(r.id for r in section_reqs)
+        section_reqs = section_reqs_map[section.id]
 
         doc.add_heading(section.title, 2)
         doc.add_paragraph(f"Страницы: {section.page_start} - {section.page_end}")
@@ -159,8 +160,6 @@ def generate_word_from_db(document, sections: List, all_requirements: List, metr
         if section_reqs:
             _add_requirements_table(doc, section_reqs)
 
-    # Requirements not linked to any section
-    orphans = [r for r in all_requirements if r.id not in assigned_ids]
     if orphans:
         doc.add_heading("Требования без раздела", 2)
         doc.add_paragraph(f"Требований: {len(orphans)}")
