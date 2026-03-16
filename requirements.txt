@@ -19,6 +19,9 @@ pydantic>=2.0.0  # Data validation (required by FastAPI)
 # Word document generation
 python-docx>=1.1.0
 
+# Excel export
+openpyxl>=3.1.0
+
 # Database
 sqlalchemy>=2.0.0
 psycopg[binary]>=3.1.0

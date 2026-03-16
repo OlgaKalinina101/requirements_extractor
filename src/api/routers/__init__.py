@@ -8,6 +8,7 @@ from .extraction import router as extraction_router
 from .documents import router as documents_router
 from .requirements import router as requirements_router
 from .projects import router as projects_router
+from .dashboard import router as dashboard_router
 from .download import router as download_router
 from .dictionaries import router as dictionaries_router
 from .comments import router as comments_router
@@ -21,6 +22,7 @@ __all__ = [
     "documents_router",
     "requirements_router",
     "projects_router",
+    "dashboard_router",
     "download_router",
     "dictionaries_router",
     "comments_router",

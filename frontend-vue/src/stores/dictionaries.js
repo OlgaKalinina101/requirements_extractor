@@ -7,24 +7,33 @@ import { ref, computed } from 'vue'
 import api from '@/services/api'
 
 export const useDictionariesStore = defineStore('dictionaries', () => {
-  const types      = ref([])  // requirement_types
-  const priorities = ref([])  // priorities
-  const statuses   = ref([])  // statuses
-  const loaded     = ref(false)
-  const loading    = ref(false)
+  const types               = ref([])  // requirement_types
+  const priorities          = ref([])  // priorities
+  const statuses            = ref([])  // statuses
+  const disciplines         = ref([])  // disciplines
+  const verificationMethods = ref([])  // verification_methods
+  const linkTypes            = ref([])  // link_types
+  const loaded               = ref(false)
+  const loading              = ref(false)
 
   async function loadAll() {
     if (loaded.value || loading.value) return
     loading.value = true
     try {
-      const [t, p, s] = await Promise.all([
+      const [t, p, s, d, v, l] = await Promise.all([
         api.get('/api/dictionaries/requirement_types'),
         api.get('/api/dictionaries/priorities'),
         api.get('/api/dictionaries/statuses'),
+        api.get('/api/dictionaries/disciplines'),
+        api.get('/api/dictionaries/verification_methods'),
+        api.get('/api/dictionaries/link_types'),
       ])
-      types.value      = t.data.filter(i => i.is_active)
-      priorities.value = p.data.filter(i => i.is_active)
-      statuses.value   = s.data.filter(i => i.is_active)
+      types.value               = t.data.filter(i => i.is_active)
+      priorities.value          = p.data.filter(i => i.is_active)
+      statuses.value            = s.data.filter(i => i.is_active)
+      disciplines.value         = d.data.filter(i => i.is_active)
+      verificationMethods.value = v.data.filter(i => i.is_active)
+      linkTypes.value           = l.data.filter(i => i.is_active)
       loaded.value = true
     } catch (e) {
       console.error('Failed to load dictionaries', e)
@@ -37,6 +46,9 @@ export const useDictionariesStore = defineStore('dictionaries', () => {
     types.value = []
     priorities.value = []
     statuses.value = []
+    disciplines.value = []
+    verificationMethods.value = []
+    linkTypes.value = []
     loaded.value = false
   }
 
@@ -101,6 +113,28 @@ export const useDictionariesStore = defineStore('dictionaries', () => {
     statuses.value.map(i => ({ title: i.name, value: i.code }))
   )
 
+  /** [{ title, value }] for v-select — disciplines */
+  const disciplineOptions = computed(() =>
+    disciplines.value.map(i => ({ title: i.name, value: i.code }))
+  )
+
+  /** [{ title, value }] for v-select — verification methods */
+  const verificationMethodOptions = computed(() =>
+    verificationMethods.value.map(i => ({ title: i.name, value: i.code }))
+  )
+
+  /** [{ title, value }] for v-select — link types */
+  const linkTypeOptions = computed(() =>
+    linkTypes.value.map(i => ({ title: i.name, value: i.code }))
+  )
+
+  /** Display name for link type code */
+  function linkTypeName(code) {
+    if (!code) return ''
+    const item = linkTypes.value.find(i => i.code === code)
+    return item ? item.name : code
+  }
+
   /** Only execution statuses (in_progress, done, blocked) with icon */
   const executionStatusOptions = computed(() =>
     statuses.value
@@ -114,11 +148,12 @@ export const useDictionariesStore = defineStore('dictionaries', () => {
   )
 
   return {
-    types, priorities, statuses, loaded, loading,
+    types, priorities, statuses, disciplines, verificationMethods, linkTypes, loaded, loading,
     loadAll, reset,
     typeName, typeColor,
     priorityName, priorityColor,
     statusName, statusColor,
-    typeOptions, priorityOptions, statusOptions, executionStatusOptions,
+    linkTypeName,
+    typeOptions, priorityOptions, statusOptions, disciplineOptions, verificationMethodOptions, linkTypeOptions, executionStatusOptions,
   }
 })

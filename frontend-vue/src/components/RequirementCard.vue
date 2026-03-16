@@ -48,6 +48,16 @@
         >
           Страница {{ requirement.page_number }}
         </v-chip>
+        <v-chip size="small" variant="tonal" v-if="requirement.discipline" color="grey">
+          {{ requirement.discipline }}
+        </v-chip>
+        <v-chip size="small" variant="tonal" v-if="requirement.verification_method" color="teal">
+          {{ requirement.verification_method }}
+        </v-chip>
+        <v-chip size="small" variant="tonal" v-if="requirement.deadline" color="orange">
+          <v-icon start size="small">mdi-calendar</v-icon>
+          {{ requirement.deadline.slice(0, 10) }}
+        </v-chip>
       </v-chip-group>
 
       <!-- Assignee info (always visible) -->
@@ -236,6 +246,42 @@
           </v-col>
         </v-row>
 
+        <v-row class="mt-2">
+          <v-col cols="6">
+            <v-select
+              v-model="editDiscipline"
+              :items="dicts.disciplineOptions"
+              label="Дисциплина"
+              density="compact"
+              variant="outlined"
+              clearable
+            />
+          </v-col>
+          <v-col cols="6">
+            <v-select
+              v-model="editVerificationMethod"
+              :items="dicts.verificationMethodOptions"
+              label="Метод подтверждения"
+              density="compact"
+              variant="outlined"
+              clearable
+            />
+          </v-col>
+        </v-row>
+
+        <v-row class="mt-2">
+          <v-col cols="6">
+            <v-text-field
+              v-model="editDeadline"
+              label="Срок выполнения"
+              type="date"
+              density="compact"
+              variant="outlined"
+              clearable
+            />
+          </v-col>
+        </v-row>
+
         <v-textarea v-model="editReason" label="Причина изменения (опционально)" rows="2" class="mt-2" />
       </v-card-text>
       <v-card-actions>
@@ -278,6 +324,9 @@ const editedText = ref('')
 const editReason = ref('')
 const editType = ref('')
 const editPriority = ref('')
+const editDiscipline = ref('')
+const editVerificationMethod = ref('')
+const editDeadline = ref('')
 
 watch(() => props.requirement, (newReq) => {
   if (newReq.status === 'modified' && newReq.human_edited) {
@@ -289,6 +338,9 @@ watch(() => props.requirement, (newReq) => {
   }
   editType.value = newReq.type || ''
   editPriority.value = newReq.priority || ''
+  editDiscipline.value = newReq.discipline || ''
+  editVerificationMethod.value = newReq.verification_method || ''
+  editDeadline.value = newReq.deadline ? newReq.deadline.slice(0, 10) : ''
 }, { immediate: true })
 
 // Display content: when modified + human_edited, parse it; else use text + subitems
@@ -365,6 +417,9 @@ const handleEdit = () => {
     reason: editReason.value || null,
     type: editType.value || null,
     priority: editPriority.value || null,
+    discipline: editDiscipline.value || null,
+    verification_method: editVerificationMethod.value || null,
+    deadline: editDeadline.value || null,
   })
   showEditDialog.value = false
   editReason.value = ''

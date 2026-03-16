@@ -1,5 +1,6 @@
 #!/bin/sh
+set -e
 echo "Running database migrations..."
 alembic upgrade head
-echo "Starting API server..."
+echo "Migrations complete. Starting API server..."
 exec python api_server.py

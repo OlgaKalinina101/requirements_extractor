@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
         documents_router,
         requirements_router,
         projects_router,
+        dashboard_router,
         download_router,
         dictionaries_router,
         comments_router,
@@ -103,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(documents_router, prefix="/api/documents")
     app.include_router(requirements_router, prefix="/api/requirements")
     app.include_router(projects_router, prefix="/api/projects")
+    app.include_router(dashboard_router, prefix="/api/dashboard")
     app.include_router(download_router, prefix="/api/download")
     app.include_router(dictionaries_router, prefix="/api/dictionaries")
     app.include_router(comments_router, prefix="/api/comments")

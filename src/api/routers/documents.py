@@ -65,6 +65,7 @@ async def get_requirements(
     status: Optional[str] = None,
     type: Optional[str] = None,
     assignee_id: Optional[str] = None,
+    discipline: Optional[str] = None,
     skip: int = 0,
     limit: int = 5000,
     db=Depends(get_db),
@@ -98,6 +99,7 @@ async def get_requirements(
             status=status,
             type=req_type,
             assignee_id=assignee_filter,
+            discipline=discipline,
             skip=skip,
             limit=limit,
         )
@@ -210,6 +212,39 @@ async def export_json(
         )
     except Exception as e:
         logger.error(f"[EXPORT] JSON generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{document_id}/export/xlsx")
+async def export_xlsx(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
+):
+    """Generate Excel (XLSX) registry from database data on-the-fly."""
+    from src.export.xlsx_exporter import export_xlsx_to_temp_file
+
+    document = crud.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    sections = crud.get_sections_by_document(db, document_id)
+    all_requirements = crud.get_requirements_by_document(db, document_id)
+    metrics = crud.get_coverage_metrics(db, document_id)
+
+    try:
+        tmp_path = export_xlsx_to_temp_file(document, sections, all_requirements, metrics)
+        if tmp_path is None:
+            raise HTTPException(status_code=500, detail="openpyxl not available")
+        background_tasks.add_task(os.unlink, tmp_path)
+        return FileResponse(
+            tmp_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=f"{document.filename}_registry.xlsx",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[EXPORT] Excel generation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

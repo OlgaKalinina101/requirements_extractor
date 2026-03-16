@@ -22,6 +22,13 @@ async def delete_comment(
     if comment.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Not allowed")
 
+    # Record in requirement history before deleting
+    crud.create_history_entry(
+        db, comment.requirement_id, "comment_deleted",
+        user_id=current_user.id,
+        comment=comment.text[:200] + ("..." if len(comment.text) > 200 else ""),
+    )
+
     deleted = crud.delete_comment(db, comment_id, current_user.id)
     if not deleted and current_user.role == "admin":
         crud.delete_comment_by_id(db, comment_id)

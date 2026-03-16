@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 
 from src.database.models import DictionaryItem
 
-VALID_DICT_TYPES = {"requirement_types", "priorities", "statuses"}
+VALID_DICT_TYPES = {
+    "requirement_types",
+    "priorities",
+    "statuses",
+    "disciplines",
+    "verification_methods",
+    "link_types",
+    "document_types",
+}
 
 
 def get_dictionary_items(db: Session, dict_type: str) -> List[DictionaryItem]:
@@ -93,6 +101,34 @@ def seed_dictionary_defaults(db: Session) -> None:
             {"code": "in_progress", "name": "В работе", "description": "Исполнитель приступил", "color": "cyan", "sort_order": 5},
             {"code": "done", "name": "Выполнено", "description": "Исполнитель завершил", "color": "teal", "sort_order": 6},
             {"code": "blocked", "name": "Заблокировано", "description": "Выполнение заблокировано", "color": "grey", "sort_order": 7},
+        ],
+        "disciplines": [
+            {"code": "Mechanical", "name": "Mechanical", "description": "Механика", "color": "blue", "sort_order": 1},
+            {"code": "Electrical", "name": "Electrical", "description": "Электротехника", "color": "orange", "sort_order": 2},
+            {"code": "I&C", "name": "I&C", "description": "КИПиА", "color": "cyan", "sort_order": 3},
+            {"code": "Process", "name": "Process", "description": "Технология", "color": "green", "sort_order": 4},
+            {"code": "Civil", "name": "Civil", "description": "Строительная часть", "color": "brown", "sort_order": 5},
+            {"code": "HVAC", "name": "HVAC", "description": "Вентиляция и кондиционирование", "color": "teal", "sort_order": 6},
+            {"code": "Piping", "name": "Piping", "description": "Трубопроводы", "color": "purple", "sort_order": 7},
+            {"code": "Software", "name": "Software", "description": "Программное обеспечение", "color": "lime-darken-2", "sort_order": 8},
+        ],
+        "verification_methods": [
+            {"code": "Analysis", "name": "Analysis", "description": "Анализ", "color": "blue", "sort_order": 1},
+            {"code": "Test", "name": "Test", "description": "Испытание", "color": "green", "sort_order": 2},
+            {"code": "Inspection", "name": "Inspection", "description": "Осмотр", "color": "orange", "sort_order": 3},
+            {"code": "Demonstration", "name": "Demonstration", "description": "Демонстрация", "color": "purple", "sort_order": 4},
+        ],
+        "link_types": [
+            {"code": "depends_on", "name": "Depends on", "description": "Зависит от", "color": "blue", "sort_order": 1},
+            {"code": "conflicts_with", "name": "Conflicts with", "description": "Конфликтует с", "color": "red", "sort_order": 2},
+            {"code": "derived_from", "name": "Derived from", "description": "Выведено из", "color": "green", "sort_order": 3},
+            {"code": "parent_child", "name": "Parent/Child", "description": "Родитель/потомок", "color": "purple", "sort_order": 4},
+        ],
+        "document_types": [
+            {"code": "TechnicalSpecification", "name": "Technical Specification", "description": "Техническая спецификация", "color": "blue", "sort_order": 1},
+            {"code": "RequirementsDocument", "name": "Requirements Document", "description": "Документ требований", "color": "green", "sort_order": 2},
+            {"code": "DesignDocument", "name": "Design Document", "description": "Проектная документация", "color": "purple", "sort_order": 3},
+            {"code": "Other", "name": "Other", "description": "Прочее", "color": "grey", "sort_order": 4},
         ],
     }
     for dict_type, items in defaults.items():

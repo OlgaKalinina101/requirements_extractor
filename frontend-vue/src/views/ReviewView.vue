@@ -9,6 +9,31 @@
         <v-chip v-if="documentsStore.currentDocument" class="mr-4" size="small">
           {{ documentsStore.currentDocument.filename }}
         </v-chip>
+        <v-menu v-if="documentsStore.currentDocument" location="bottom">
+          <template v-slot:activator="{ props: menuProps }">
+            <v-btn v-bind="menuProps" variant="text" prepend-icon="mdi-download">
+              Экспорт
+            </v-btn>
+          </template>
+          <v-list density="compact">
+            <v-list-item :href="exportUrls.word(documentsStore.currentDocument.id)" target="_blank">
+              <template v-slot:prepend><v-icon color="blue">mdi-file-word</v-icon></template>
+              <v-list-item-title>Word</v-list-item-title>
+            </v-list-item>
+            <v-list-item :href="exportUrls.xlsx(documentsStore.currentDocument.id)" target="_blank">
+              <template v-slot:prepend><v-icon color="success">mdi-file-excel</v-icon></template>
+              <v-list-item-title>Excel (XLSX)</v-list-item-title>
+            </v-list-item>
+            <v-list-item :href="exportUrls.json(documentsStore.currentDocument.id)" target="_blank">
+              <template v-slot:prepend><v-icon color="orange">mdi-code-json</v-icon></template>
+              <v-list-item-title>JSON</v-list-item-title>
+            </v-list-item>
+            <v-list-item :href="exportUrls.txt(documentsStore.currentDocument.id)" target="_blank">
+              <template v-slot:prepend><v-icon color="green">mdi-chart-line</v-icon></template>
+              <v-list-item-title>TXT</v-list-item-title>
+            </v-list-item>
+          </v-list>
+        </v-menu>
         <v-btn
           icon
           variant="text"
@@ -107,6 +132,16 @@
                   class="mt-2"
                 ></v-select>
 
+                <v-select
+                  v-model="disciplineFilter"
+                  :items="disciplineOptions"
+                  label="Дисциплина"
+                  density="compact"
+                  clearable
+                  @update:model-value="updateFilters"
+                  class="mt-2"
+                ></v-select>
+
                 <v-switch
                   v-model="onlyMine"
                   label="Только мои требования"
@@ -186,7 +221,7 @@ import PDFViewer from '../components/PDFViewer.vue'
 import MetricsPanel from '../components/MetricsPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDictionariesStore } from '@/stores/dictionaries'
-import { usersApi } from '@/services/api'
+import { usersApi, exportUrls } from '@/services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -200,6 +235,7 @@ const requirementsScrollContainer = ref(null)
 const currentPdfPage = ref(1)
 const statusFilter = ref(null)
 const typeFilter = ref(null)
+const disciplineFilter = ref(null)
 const onlyMine = ref(false)
 
 // Users list for assignee dropdowns in RequirementCard
@@ -210,11 +246,19 @@ provide('documentId', computed(() => route.params.documentId))
 // Filter options come from the dictionaries store (loaded from DB)
 const statusOptions = computed(() => dicts.statusOptions)
 const typeOptions   = computed(() => dicts.typeOptions)
+const disciplineOptions = computed(() => {
+  const disciplines = new Set()
+  requirementsStore.requirements.forEach(r => {
+    if (r.discipline) disciplines.add(r.discipline)
+  })
+  return [...disciplines].sort()
+})
 
 const updateFilters = () => {
   requirementsStore.setFilters({
     status: statusFilter.value,
     type: typeFilter.value,
+    discipline: disciplineFilter.value,
   })
 }
 
@@ -251,9 +295,9 @@ const handleReject = async (requirementId, reason) => {
   } catch { /* store handles error */ }
 }
 
-const handleEdit = async (requirementId, editedText, reason, type = null, priority = null) => {
+const handleEdit = async (requirementId, editedText, reason, type = null, priority = null, discipline = null, verification_method = null, deadline = null) => {
   try {
-    await requirementsStore.editRequirement(requirementId, editedText, reason, null, type, priority)
+    await requirementsStore.editRequirement(requirementId, editedText, reason, null, type, priority, discipline, verification_method, deadline)
   } catch { /* store handles error */ }
 }
 

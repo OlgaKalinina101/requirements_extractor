@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session, joinedload
 
-from src.database.models import Requirement
+from src.database.models import Requirement, RequirementLink
 from src.models import RequirementType
 
 logger = logging.getLogger("api")
@@ -54,7 +54,13 @@ def get_requirement(db: Session, requirement_id: int) -> Optional[Requirement]:
     """Get requirement by ID."""
     return (
         db.query(Requirement)
-        .options(joinedload(Requirement.section))
+        .options(
+            joinedload(Requirement.section),
+            joinedload(Requirement.parent),
+            joinedload(Requirement.children),
+            joinedload(Requirement.outgoing_links).joinedload(RequirementLink.target_requirement),
+            joinedload(Requirement.incoming_links).joinedload(RequirementLink.source_requirement),
+        )
         .filter(Requirement.id == requirement_id)
         .first()
     )
@@ -66,6 +72,7 @@ def get_requirements_by_document(
     status: Optional[str] = None,
     type: Optional[RequirementType] = None,
     assignee_id: Optional[int] = None,
+    discipline: Optional[str] = None,
     skip: int = 0,
     limit: Optional[int] = None,
 ):
@@ -82,6 +89,8 @@ def get_requirements_by_document(
         query = query.filter(Requirement.type == type_val)
     if assignee_id is not None:
         query = query.filter(Requirement.assignee_id == assignee_id)
+    if discipline:
+        query = query.filter(Requirement.discipline == discipline)
     query = query.order_by(
         Requirement.section_id.asc().nulls_last(),
         Requirement.page_number.asc().nulls_last(),
@@ -128,6 +137,10 @@ def edit_requirement(
     edited_by: Optional[str] = None,
     req_type: Optional[str] = None,
     priority: Optional[str] = None,
+    discipline: Optional[str] = None,
+    verification_method: Optional[str] = None,
+    deadline=None,
+    parent_id: Optional[int] = None,
 ) -> Optional[Requirement]:
     """Edit a requirement (mark as modified)."""
     db_requirement = get_requirement(db, requirement_id)
@@ -143,6 +156,14 @@ def edit_requirement(
         db_requirement.type = req_type
     if priority is not None:
         db_requirement.priority = priority
+    if discipline is not None:
+        db_requirement.discipline = discipline
+    if verification_method is not None:
+        db_requirement.verification_method = verification_method
+    if deadline is not None:
+        db_requirement.deadline = deadline
+    if parent_id is not None:
+        db_requirement.parent_id = parent_id
     db.commit()
     db.refresh(db_requirement)
     return db_requirement

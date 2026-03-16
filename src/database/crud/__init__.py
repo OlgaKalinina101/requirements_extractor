@@ -44,6 +44,10 @@ from src.database.crud.metrics import (
     get_coverage_metrics,
     create_coverage_metrics,
 )
+from src.database.crud.requirement_history import (
+    create_history_entry,
+    get_requirement_history,
+)
 from src.database.crud.comments import (
     create_comment,
     get_comments,
@@ -51,6 +55,7 @@ from src.database.crud.comments import (
     delete_comment,
     delete_comment_by_id,
 )
+from src.database.crud.dashboard import get_dashboard_stats, get_my_dashboard_stats
 from src.database.crud.dictionaries import (
     VALID_DICT_TYPES,
     get_dictionary_items,
@@ -59,6 +64,14 @@ from src.database.crud.dictionaries import (
     update_dictionary_item,
     delete_dictionary_item,
     seed_dictionary_defaults,
+)
+from src.database.crud.requirement_links import (
+    get_links_for_requirement,
+    get_outgoing_links,
+    get_incoming_links,
+    create_link,
+    delete_link,
+    get_link,
 )
 
 __all__ = [
@@ -106,6 +119,12 @@ __all__ = [
     "get_comment",
     "delete_comment",
     "delete_comment_by_id",
+    # requirement_history
+    "create_history_entry",
+    "get_requirement_history",
+    # dashboard
+    "get_dashboard_stats",
+    "get_my_dashboard_stats",
     # dictionaries
     "VALID_DICT_TYPES",
     "get_dictionary_items",
@@ -114,4 +133,11 @@ __all__ = [
     "update_dictionary_item",
     "delete_dictionary_item",
     "seed_dictionary_defaults",
+    # requirement_links
+    "get_links_for_requirement",
+    "get_outgoing_links",
+    "get_incoming_links",
+    "create_link",
+    "delete_link",
+    "get_link",
 ]

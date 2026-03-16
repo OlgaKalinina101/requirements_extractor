@@ -5,12 +5,16 @@ from fastapi import APIRouter, Depends, Form, HTTPException
 from src.api.serializers import project_to_dict, project_with_docs
 from src.database.database import get_db
 from src.database import crud
+from src.auth.dependencies import get_current_user
 
 router = APIRouter(tags=["projects"])
 
 
 @router.get("")
-async def get_projects(db=Depends(get_db)):
+async def get_projects(
+    db=Depends(get_db),
+    _current=Depends(get_current_user),
+):
     """Get all projects."""
     projects = crud.get_all_projects(db)
     project_ids = [p.id for p in projects]
@@ -28,6 +32,7 @@ async def create_project(
     code: str = Form(None),
     description: str = Form(None),
     db=Depends(get_db),
+    _current=Depends(get_current_user),
 ):
     """Create a new project."""
     if code:
@@ -40,7 +45,11 @@ async def create_project(
 
 
 @router.get("/{project_id}")
-async def get_project(project_id: int, db=Depends(get_db)):
+async def get_project(
+    project_id: int,
+    db=Depends(get_db),
+    _current=Depends(get_current_user),
+):
     """Get project details with documents."""
     project = crud.get_project(db, project_id)
     if not project:
@@ -60,6 +69,7 @@ async def update_project(
     description: str = Form(None),
     status: str = Form(None),
     db=Depends(get_db),
+    _current=Depends(get_current_user),
 ):
     """Update a project."""
     project = crud.update_project(db, project_id, name=name, code=code, description=description, status=status)
@@ -69,7 +79,11 @@ async def update_project(
 
 
 @router.delete("/{project_id}")
-async def delete_project(project_id: int, db=Depends(get_db)):
+async def delete_project(
+    project_id: int,
+    db=Depends(get_db),
+    _current=Depends(get_current_user),
+):
     """Delete a project and all its documents."""
     success = crud.delete_project(db, project_id)
     if not success:

@@ -6,7 +6,7 @@ import HomeView from '../views/HomeView.vue'
 import ReviewView from '../views/ReviewView.vue'
 import AdminView from '../views/AdminView.vue'
 import RequirementDetailView from '../views/RequirementDetailView.vue'
-import DashboardView from '../views/DashboardView.vue'
+import DashboardRouterView from '../views/DashboardRouterView.vue'
 import LoginView from '../views/LoginView.vue'
 import UsersView from '../views/UsersView.vue'
 
@@ -21,6 +21,10 @@ const routes = [
     path: '/',
     name: 'projects',
     component: ProjectsView
+  },
+  {
+    path: '/projects',
+    redirect: '/'
   },
   {
     path: '/projects/:projectId',
@@ -61,7 +65,7 @@ const routes = [
   {
     path: '/dashboard',
     name: 'dashboard',
-    component: DashboardView
+    component: DashboardRouterView
   }
 ]
 

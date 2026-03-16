@@ -11,6 +11,7 @@ from src.api.schemas import (
     AssignRequest,
     SetStatusRequest,
     CommentRequest,
+    CreateLinkRequest,
 )
 from src.api.serializers import requirement_to_dict, requirement_summary, comment_to_dict
 from src.database import crud
@@ -48,13 +49,17 @@ async def get_requirement(
 async def accept_requirement_endpoint(
     requirement_id: int,
     db=Depends(get_db),
-    _current=Depends(require_manager),
+    current_user=Depends(require_manager),
 ):
     """Accept a requirement (mark as accepted)."""
     try:
         requirement = crud.accept_requirement(db, requirement_id)
         if not requirement:
             raise HTTPException(status_code=404, detail="Requirement not found")
+        crud.create_history_entry(
+            db, requirement_id, "accepted",
+            user_id=current_user.id, new_value="accepted",
+        )
         logger.info(f"[REVIEW] Requirement {requirement_id} accepted")
         result = requirement_summary(requirement)
         result["message"] = "Requirement accepted successfully"
@@ -71,7 +76,7 @@ async def reject_requirement_endpoint(
     requirement_id: int,
     request: Optional[RejectRequirementRequest] = None,
     db=Depends(get_db),
-    _current=Depends(require_manager),
+    current_user=Depends(require_manager),
 ):
     """Reject a requirement (mark as rejected)."""
     try:
@@ -79,6 +84,10 @@ async def reject_requirement_endpoint(
         requirement = crud.reject_requirement(db, requirement_id, reason=reason)
         if not requirement:
             raise HTTPException(status_code=404, detail="Requirement not found")
+        crud.create_history_entry(
+            db, requirement_id, "rejected",
+            user_id=current_user.id, new_value="rejected", comment=reason,
+        )
         logger.info(f"[REVIEW] Requirement {requirement_id} rejected (reason: {reason or 'none'})")
         result = requirement_summary(requirement)
         result["message"] = "Requirement rejected successfully"
@@ -95,10 +104,14 @@ async def edit_requirement_endpoint(
     requirement_id: int,
     request: EditRequirementRequest,
     db=Depends(get_db),
-    _current=Depends(require_manager),
+    current_user=Depends(require_manager),
 ):
     """Edit a requirement (mark as modified)."""
     try:
+        req = crud.get_requirement(db, requirement_id)
+        if not req:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+        old_text = req.text
         requirement = crud.edit_requirement(
             db=db,
             requirement_id=requirement_id,
@@ -107,9 +120,17 @@ async def edit_requirement_endpoint(
             edited_by=request.edited_by,
             req_type=request.type,
             priority=request.priority,
+            discipline=request.discipline,
+            verification_method=request.verification_method,
+            deadline=request.deadline,
+            parent_id=request.parent_id,
         )
-        if not requirement:
-            raise HTTPException(status_code=404, detail="Requirement not found")
+        crud.create_history_entry(
+            db, requirement_id, "edited",
+            user_id=current_user.id,
+            field_name="text", old_value=old_text, new_value=request.edited_text,
+            comment=request.reason,
+        )
         logger.info(f"[REVIEW] Requirement {requirement_id} edited by {request.edited_by or 'unknown'}")
         result = requirement_summary(requirement)
         result["text"] = requirement.text
@@ -138,6 +159,17 @@ async def assign_requirement(
     req = crud.assign_requirement(db, requirement_id, request.assignee_id)
     if not req:
         raise HTTPException(status_code=404, detail="Requirement not found")
+
+    new_assignee = request.assignee_id
+    assignee_name = None
+    if new_assignee:
+        u = crud.get_user_by_id(db, new_assignee)
+        assignee_name = (u.full_name or u.email) if u else str(new_assignee)
+    crud.create_history_entry(
+        db, requirement_id, "assigned",
+        user_id=current_user.id,
+        field_name="assignee_id", new_value=assignee_name or "(снято)",
+    )
 
     assignee_info = None
     if req.assignee_id:
@@ -176,7 +208,37 @@ async def set_requirement_status(
             raise HTTPException(status_code=403, detail="Manager role required")
 
     req = crud.update_requirement_status(db, requirement_id, request.status)
+    crud.create_history_entry(
+        db, requirement_id, "status_changed",
+        user_id=current_user.id,
+        field_name="status", new_value=request.status,
+    )
     return {"requirement_id": requirement_id, "status": req.status}
+
+
+@router.get("/{requirement_id}/history")
+async def get_history(
+    requirement_id: int,
+    limit: int = 100,
+    db=Depends(get_db),
+    _current=Depends(get_current_user),
+):
+    """Get audit log (timeline) for a requirement."""
+    entries = crud.get_requirement_history(db, requirement_id, limit=limit)
+    result = []
+    for e in entries:
+        user = crud.get_user_by_id(db, e.user_id) if e.user_id else None
+        result.append({
+            "id": e.id,
+            "action": e.action,
+            "field_name": e.field_name,
+            "old_value": e.old_value,
+            "new_value": e.new_value,
+            "comment": e.comment,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "user_name": (user.full_name or user.email) if user else None,
+        })
+    return result
 
 
 @router.get("/{requirement_id}/comments")
@@ -206,4 +268,53 @@ async def add_comment(
     if not req:
         raise HTTPException(status_code=404, detail="Requirement not found")
     comment = crud.create_comment(db, requirement_id, current_user.id, request.text)
+    crud.create_history_entry(
+        db, requirement_id, "comment_added",
+        user_id=current_user.id,
+        comment=request.text[:200] + ("..." if len(request.text) > 200 else ""),
+    )
     return comment_to_dict(comment, current_user)
+
+
+@router.post("/{requirement_id}/links", status_code=201)
+async def create_requirement_link(
+    requirement_id: int,
+    request: CreateLinkRequest,
+    db=Depends(get_db),
+    current_user=Depends(require_manager),
+):
+    """Create a link from this requirement to another. Manager/admin only."""
+    link = crud.create_link(
+        db,
+        source_requirement_id=requirement_id,
+        target_requirement_id=request.target_requirement_id,
+        link_type=request.link_type,
+    )
+    if not link:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid link: requirements not found, same requirement, or duplicate link",
+        )
+    return {
+        "id": link.id,
+        "source_requirement_id": requirement_id,
+        "target_requirement_id": request.target_requirement_id,
+        "link_type": link.link_type,
+        "created_at": link.created_at.isoformat() if link.created_at else None,
+    }
+
+
+@router.delete("/{requirement_id}/links/{link_id}", status_code=204)
+async def delete_requirement_link(
+    requirement_id: int,
+    link_id: int,
+    db=Depends(get_db),
+    current_user=Depends(require_manager),
+):
+    """Delete a requirement link. Manager/admin only. Link must involve this requirement (as source or target)."""
+    link = crud.get_link(db, link_id)
+    if not link:
+        raise HTTPException(status_code=404, detail="Link not found")
+    if link.source_requirement_id != requirement_id and link.target_requirement_id != requirement_id:
+        raise HTTPException(status_code=403, detail="Link does not belong to this requirement")
+    crud.delete_link(db, link_id)

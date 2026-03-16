@@ -123,17 +123,23 @@ const project = ref(null)
 const showingResults = ref(false)
 
 const breadcrumbs = computed(() => [
-  { title: 'Проекты', to: '/projects', disabled: false },
+  { title: 'Проекты', to: '/', disabled: false },
   { title: project.value?.name || '...', disabled: true },
 ])
 
 const refreshProject = async () => {
   loading.value = true
+  project.value = null
   try {
-    const data = await projectsStore.fetchProject(props.projectId)
+    const id = props.projectId
+    if (id === undefined || id === null || id === '') {
+      return
+    }
+    const data = await projectsStore.fetchProject(id)
     project.value = data
   } catch (e) {
     project.value = null
+    console.error('Project fetch error:', e?.response?.status, e?.response?.data, e?.message)
   } finally {
     loading.value = false
   }

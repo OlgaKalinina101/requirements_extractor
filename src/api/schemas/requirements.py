@@ -1,5 +1,6 @@
 """Requirements API schemas."""
 
+from datetime import date
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -13,6 +14,10 @@ class EditRequirementRequest(BaseModel):
     edited_by: Optional[str] = Field(None, description="User who edited the requirement")
     type: Optional[str] = Field(None, description="Requirement type override")
     priority: Optional[str] = Field(None, description="Requirement priority override")
+    discipline: Optional[str] = Field(None, description="Discipline")
+    verification_method: Optional[str] = Field(None, description="Verification method (Analysis, Test, etc.)")
+    deadline: Optional[date] = Field(None, description="Due date for execution")
+    parent_id: Optional[int] = Field(None, description="Parent requirement ID for hierarchy")
 
 
 class RejectRequirementRequest(BaseModel):
@@ -31,3 +36,10 @@ class SetStatusRequest(BaseModel):
     """Request model for setting requirement status."""
 
     status: str = Field(..., description="New status")
+
+
+class CreateLinkRequest(BaseModel):
+    """Request model for creating a requirement link."""
+
+    target_requirement_id: int = Field(..., description="ID of the target requirement")
+    link_type: str = Field(..., description="Link type (depends_on, conflicts_with, derived_from, parent_child)")

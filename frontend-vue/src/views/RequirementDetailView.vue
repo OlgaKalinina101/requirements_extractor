@@ -64,7 +64,121 @@
                   #{{ requirement.document_id }}
                 </v-btn>
               </v-col>
+              <v-col cols="6" sm="3">
+                <div class="text-caption text-medium-emphasis">Дисциплина</div>
+                <div class="mt-1">{{ requirement.discipline || '—' }}</div>
+              </v-col>
+              <v-col cols="6" sm="3">
+                <div class="text-caption text-medium-emphasis">Метод подтверждения</div>
+                <div class="mt-1">{{ requirement.verification_method || '—' }}</div>
+              </v-col>
+              <v-col cols="6" sm="3">
+                <div class="text-caption text-medium-emphasis">Срок выполнения</div>
+                <div class="mt-1">{{ requirement.deadline ? formatDateOnly(requirement.deadline) : '—' }}</div>
+              </v-col>
             </v-row>
+
+            <!-- Hierarchy: parent / children -->
+            <div v-if="requirement.parent_requirement_id || (requirement.children && requirement.children.length)" class="mb-3">
+              <div class="text-caption text-medium-emphasis">Иерархия</div>
+              <div class="text-body-2 mt-1">
+                <div v-if="requirement.parent_requirement_id" class="mb-1">
+                  <span class="text-medium-emphasis">Родительское:</span>
+                  <v-btn
+                    v-if="requirement.parent_id"
+                    size="small"
+                    variant="text"
+                    :to="`/requirement/${requirement.parent_id}`"
+                    class="ml-1 pa-0"
+                  >
+                    {{ requirement.parent_requirement_id }}
+                  </v-btn>
+                </div>
+                <div v-if="requirement.children && requirement.children.length">
+                  <span class="text-medium-emphasis">Дочерние:</span>
+                  <v-btn
+                    v-for="ch in requirement.children"
+                    :key="ch.id"
+                    size="small"
+                    variant="tonal"
+                    class="ml-1 mb-1"
+                    :to="`/requirement/${ch.id}`"
+                  >
+                    {{ ch.requirement_id }}
+                  </v-btn>
+                </div>
+              </div>
+            </div>
+
+            <!-- Links (relations) -->
+            <div class="mb-3">
+              <div class="text-caption text-medium-emphasis mb-1">Связи между требованиями</div>
+              <div class="text-body-2">
+                <div v-if="allLinks.length === 0 && !showAddLinkForm" class="text-medium-emphasis mb-1">
+                  Нет связей
+                </div>
+                <div v-for="link in allLinks" :key="link.id" class="d-flex align-center mb-1">
+                  <v-chip size="small" variant="tonal" color="purple" class="mr-2">
+                    {{ dicts.linkTypeName(link.link_type) || link.link_type }}
+                  </v-chip>
+                  <v-btn
+                    size="small"
+                    variant="text"
+                    :to="`/requirement/${link.requirement_id}`"
+                    class="pa-0"
+                  >
+                    {{ link.requirement_requirement_id }}
+                  </v-btn>
+                  <span class="text-medium-emphasis ml-1">— {{ link.requirement_text_preview }}</span>
+                  <v-btn
+                    v-if="auth.isManager"
+                    icon
+                    size="x-small"
+                    variant="text"
+                    color="error"
+                    class="ml-1"
+                    @click="removeLink(link)"
+                  >
+                    <v-icon size="small">mdi-delete</v-icon>
+                  </v-btn>
+                </div>
+                <v-btn
+                  v-if="auth.isManager && !showAddLinkForm"
+                  size="small"
+                  variant="tonal"
+                  prepend-icon="mdi-link-plus"
+                  class="mt-1"
+                  @click="showAddLinkForm = true"
+                >
+                  Добавить связь
+                </v-btn>
+                <div v-if="showAddLinkForm && auth.isManager" class="mt-2 pa-2 bg-grey-lighten-4 rounded">
+                  <v-autocomplete
+                    v-model="newLinkTargetId"
+                    :items="documentRequirementsForLink"
+                    item-title="label"
+                    item-value="id"
+                    label="Целевое требование"
+                    density="compact"
+                    variant="outlined"
+                    clearable
+                    :loading="loadingDocReqs"
+                  />
+                  <v-select
+                    v-model="newLinkType"
+                    :items="dicts.linkTypeOptions"
+                    label="Тип связи"
+                    density="compact"
+                    variant="outlined"
+                    class="mt-2"
+                  />
+                  <div class="d-flex gap-2 mt-2">
+                    <v-btn size="small" color="primary" :loading="addingLink" @click="addLink">Добавить</v-btn>
+                    <v-btn size="small" variant="text" @click="cancelAddLink">Отмена</v-btn>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <!-- Section -->
             <div v-if="requirement.section_number || requirement.section_title" class="mb-3">
@@ -268,9 +382,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { requirementsApi, usersApi } from '@/services/api'
+import { requirementsApi, usersApi, documentsApi } from '@/services/api'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { useDictionariesStore } from '@/stores/dictionaries'
@@ -285,6 +399,7 @@ const dicts = useDictionariesStore()
 const loading = ref(true)
 const requirement = ref(null)
 const comments = ref([])
+const history = ref([])
 const users = ref([])
 const selectedAssignee = ref(null)
 const assigneeName = ref(null)
@@ -294,6 +409,20 @@ const commentLoading = ref(false)
 const actionLoading = ref(null)
 const rejectDialog = ref(false)
 const rejectReason = ref('')
+const showAddLinkForm = ref(false)
+const newLinkTargetId = ref(null)
+const newLinkType = ref(null)
+const documentRequirementsForLink = ref([])
+const loadingDocReqs = ref(false)
+const addingLink = ref(false)
+
+const allLinks = computed(() => {
+  const r = requirement.value
+  if (!r) return []
+  const out = (r.outgoing_links || []).map(l => ({ ...l, direction: 'out' }))
+  const inc = (r.incoming_links || []).map(l => ({ ...l, direction: 'in' }))
+  return [...out, ...inc]
+})
 
 const breadcrumbs = computed(() => [
   { title: 'Проекты', to: '/', disabled: false },
@@ -332,19 +461,57 @@ const humanEditedParsed = computed(() => {
 })
 
 const auditLog = computed(() => {
-  if (!requirement.value) return []
-  const r = requirement.value
-  const log = [{ action: 'Создано AI', user: 'System', date: formatDate(r.created_at), icon: 'mdi-robot', color: 'blue' }]
-  if (r.status === 'modified' && r.edited_at) {
-    log.push({ action: 'Отредактировано', user: r.edited_by || '—', date: formatDate(r.edited_at), icon: 'mdi-pencil', color: 'orange' })
+  const fromHistory = history.value.map((e) => {
+    const actionLabels = {
+      accepted: 'Принято',
+      rejected: 'Отклонено',
+      edited: 'Отредактировано',
+      assigned: 'Назначен исполнитель',
+      status_changed: 'Изменён статус',
+      comment_added: 'Добавлен комментарий',
+      comment_deleted: 'Удалён комментарий',
+    }
+    const icons = {
+      accepted: 'mdi-check',
+      rejected: 'mdi-close',
+      edited: 'mdi-pencil',
+      assigned: 'mdi-account',
+      status_changed: 'mdi-update',
+      comment_added: 'mdi-comment',
+      comment_deleted: 'mdi-comment-remove',
+    }
+    const colors = {
+      accepted: 'green',
+      rejected: 'red',
+      edited: 'orange',
+      assigned: 'blue',
+      status_changed: 'purple',
+      comment_added: 'grey',
+      comment_deleted: 'orange',
+    }
+    let action = actionLabels[e.action] || e.action
+    if (e.action === 'assigned' && e.new_value) action += `: ${e.new_value}`
+    if (e.action === 'status_changed' && e.new_value) action += `: ${e.new_value}`
+    if (e.action === 'edited' && e.comment) action += ` (${e.comment})`
+    if (e.action === 'comment_deleted' && e.comment) action += `: "${e.comment}"`
+    return {
+      action,
+      user: e.user_name || '—',
+      date: formatDate(e.created_at),
+      icon: icons[e.action] || 'mdi-circle',
+      color: colors[e.action] || 'grey',
+    }
+  })
+  if (fromHistory.length === 0 && requirement.value?.created_at) {
+    return [{
+      action: 'Создано',
+      user: 'System',
+      date: formatDate(requirement.value.created_at),
+      icon: 'mdi-robot',
+      color: 'blue',
+    }]
   }
-  if (r.status === 'accepted') {
-    log.push({ action: 'Принято', user: r.edited_by || '—', date: formatDate(r.edited_at || r.created_at), icon: 'mdi-check', color: 'green' })
-  }
-  if (r.status === 'rejected') {
-    log.push({ action: 'Отклонено', user: r.edited_by || '—', date: formatDate(r.edited_at || r.created_at), icon: 'mdi-close', color: 'red' })
-  }
-  return log
+  return fromHistory
 })
 
 
@@ -356,6 +523,11 @@ function initials(name) {
 function formatDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function formatDateOnly(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 async function loadComments() {
@@ -370,6 +542,7 @@ async function postComment() {
     const { data } = await requirementsApi.addComment(route.params.requirementId, newComment.value.trim())
     comments.value.push(data)
     newComment.value = ''
+    await refreshHistory()
   } catch {
     notifications.notifyError('Не удалось добавить комментарий')
   } finally {
@@ -392,6 +565,7 @@ async function saveAssignee(val) {
     await requirementsApi.assign(route.params.requirementId, val ?? null)
     const user = users.value.find(u => u.id === val)
     assigneeName.value = user?.label || null
+    await refreshHistory()
     notifications.notifySuccess('Исполнитель назначен')
   } catch {
     notifications.notifyError('Ошибка назначения')
@@ -400,11 +574,73 @@ async function saveAssignee(val) {
   }
 }
 
+async function refreshHistory() {
+  try {
+    const { data } = await requirementsApi.getHistory(route.params.requirementId)
+    history.value = data || []
+  } catch { /* ignore */ }
+}
+
+async function loadDocumentRequirementsForLink() {
+  const docId = requirement.value?.document_id
+  if (!docId) return
+  loadingDocReqs.value = true
+  try {
+    const { data } = await documentsApi.getRequirements(docId)
+    const reqs = data?.requirements || data || []
+    documentRequirementsForLink.value = reqs
+      .filter(r => r.id !== requirement.value?.id)
+      .map(r => ({ id: r.id, label: `${r.requirement_id} — ${((r.text || '').slice(0, 50))}${(r.text || '').length > 50 ? '...' : ''}` }))
+  } catch {
+    documentRequirementsForLink.value = []
+  } finally {
+    loadingDocReqs.value = false
+  }
+}
+
+function cancelAddLink() {
+  showAddLinkForm.value = false
+  newLinkTargetId.value = null
+  newLinkType.value = null
+}
+
+async function addLink() {
+  if (!newLinkTargetId.value || !newLinkType.value) return
+  addingLink.value = true
+  try {
+    await requirementsApi.createLink(route.params.requirementId, newLinkTargetId.value, newLinkType.value)
+    const { data } = await requirementsApi.getById(route.params.requirementId)
+    requirement.value = data
+    cancelAddLink()
+    notifications.notifySuccess('Связь добавлена')
+  } catch {
+    notifications.notifyError('Не удалось добавить связь')
+  } finally {
+    addingLink.value = false
+  }
+}
+
+async function removeLink(link) {
+  try {
+    await requirementsApi.deleteLink(route.params.requirementId, link.id)
+    const { data } = await requirementsApi.getById(route.params.requirementId)
+    requirement.value = data
+    notifications.notifySuccess('Связь удалена')
+  } catch {
+    notifications.notifyError('Не удалось удалить связь')
+  }
+}
+
+watch(showAddLinkForm, (val) => {
+  if (val) loadDocumentRequirementsForLink()
+})
+
 async function doAccept() {
   actionLoading.value = 'accept'
   try {
     await requirementsApi.accept(route.params.requirementId)
     requirement.value.status = 'accepted'
+    await refreshHistory()
     notifications.notifySuccess('Требование принято')
   } catch {
     notifications.notifyError('Ошибка')
@@ -419,6 +655,7 @@ async function doReject() {
     await requirementsApi.reject(route.params.requirementId, rejectReason.value || null)
     requirement.value.status = 'rejected'
     rejectDialog.value = false
+    await refreshHistory()
     notifications.notifyInfo('Требование отклонено')
   } catch {
     notifications.notifyError('Ошибка')
@@ -431,13 +668,15 @@ onMounted(async () => {
   const reqId = route.params.requirementId
   if (!reqId) return
   try {
-    const [reqRes, commentRes, usersRes] = await Promise.all([
+    const [reqRes, commentRes, historyRes, usersRes] = await Promise.all([
       requirementsApi.getById(reqId),
       requirementsApi.getComments(reqId),
+      requirementsApi.getHistory(reqId),
       usersApi.getAll(),
     ])
     requirement.value = reqRes.data
     comments.value = commentRes.data
+    history.value = historyRes.data || []
     users.value = usersRes.data.map(u => ({ id: u.id, label: u.full_name || u.email }))
 
     if (requirement.value.assignee_id) {

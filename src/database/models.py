@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Date,
     ForeignKey,
     JSON,
     Float,
@@ -46,6 +47,7 @@ class User(Base):
     # Relationships
     assigned_requirements = relationship("Requirement", back_populates="assignee", foreign_keys="Requirement.assignee_id")
     comments = relationship("Comment", back_populates="author", cascade="all, delete-orphan")
+    requirement_history = relationship("RequirementHistory", back_populates="user", cascade="all, delete-orphan")
 
 
 class Project(Base):
@@ -79,6 +81,7 @@ class Document(Base):
     filename = Column(String(255), nullable=False)
     file_path = Column(Text, nullable=False)
     status = Column(String(50), default="pending", nullable=False)
+    document_type = Column(String(100), nullable=True)  # Technical Specification, etc. (from dictionary)
     total_pages = Column(Integer, nullable=True)
     model_used = Column(String(100), nullable=True)
     uploaded_at = Column(DateTime, default=func.now(), nullable=False)
@@ -147,6 +150,7 @@ class Requirement(Base):
     id = Column(Integer, primary_key=True, index=True)
     document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
     section_id = Column(Integer, ForeignKey("sections.id", ondelete="SET NULL"), nullable=True)
+    parent_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True, index=True)
     
     requirement_id = Column(String(50), nullable=False, index=True)
     text = Column(Text, nullable=False)
@@ -156,6 +160,9 @@ class Requirement(Base):
     bbox = Column(JSON, nullable=True)  # Bounding box: {"x": 0, "y": 0, "width": 100, "height": 50}
     subitems = Column(JSON, nullable=True)  # List items if requirement is grouped
     assignee_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    discipline = Column(String(100), nullable=True, index=True)
+    deadline = Column(Date, nullable=True)  # Due date for execution
+    verification_method = Column(String(100), nullable=True)  # Analysis, Test, Inspection, Demonstration (from dictionary)
 
     # Review fields
     status = Column(String(50), default="pending", nullable=False, index=True)
@@ -170,8 +177,23 @@ class Requirement(Base):
     # Relationships
     document = relationship("Document", back_populates="requirements")
     section = relationship("Section", back_populates="requirements")
+    parent = relationship("Requirement", remote_side="Requirement.id", back_populates="children")
+    children = relationship("Requirement", back_populates="parent", cascade="all, delete-orphan")
     assignee = relationship("User", back_populates="assigned_requirements", foreign_keys=[assignee_id])
     comments = relationship("Comment", back_populates="requirement", cascade="all, delete-orphan")
+    history = relationship("RequirementHistory", back_populates="requirement", cascade="all, delete-orphan")
+    outgoing_links = relationship(
+        "RequirementLink",
+        foreign_keys="RequirementLink.source_requirement_id",
+        back_populates="source_requirement",
+        cascade="all, delete-orphan",
+    )
+    incoming_links = relationship(
+        "RequirementLink",
+        foreign_keys="RequirementLink.target_requirement_id",
+        back_populates="target_requirement",
+        cascade="all, delete-orphan",
+    )
 
 
 class CoverageMetrics(Base):
@@ -242,3 +264,37 @@ class Comment(Base):
     # Relationships
     requirement = relationship("Requirement", back_populates="comments")
     author = relationship("User", back_populates="comments")
+
+
+class RequirementLink(Base):
+    """Link between two requirements (Depends on, Conflicts with, Derived from, etc.)."""
+    __tablename__ = "requirement_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
+    link_type = Column(String(50), nullable=False)  # depends_on, conflicts_with, derived_from, parent_child (from dictionary)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    # Relationships
+    source_requirement = relationship("Requirement", foreign_keys=[source_requirement_id], back_populates="outgoing_links")
+    target_requirement = relationship("Requirement", foreign_keys=[target_requirement_id], back_populates="incoming_links")
+
+
+class RequirementHistory(Base):
+    """Audit log for requirement changes - who, when, what changed."""
+    __tablename__ = "requirement_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action = Column(String(50), nullable=False)  # accepted, rejected, edited, assigned, status_changed, etc.
+    field_name = Column(String(100), nullable=True)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    # Relationships
+    requirement = relationship("Requirement", back_populates="history")
+    user = relationship("User", back_populates="requirement_history")

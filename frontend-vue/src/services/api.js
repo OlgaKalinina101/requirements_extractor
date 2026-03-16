@@ -34,6 +34,11 @@ api.interceptors.response.use(
   }
 )
 
+// Dashboard API (manager)
+export const dashboardApi = {
+  getStats: () => api.get('/api/dashboard'),
+}
+
 // Projects API
 export const projectsApi = {
   getAll: () => api.get('/api/projects'),
@@ -94,15 +99,20 @@ export const requirementsApi = {
   getById: (id) => api.get(`/api/requirements/${id}`),
   accept: (id) => api.post(`/api/requirements/${id}/accept`),
   reject: (id, reason = null) => api.post(`/api/requirements/${id}/reject`, reason ? { reason } : {}),
-  edit: (id, editedText, reason = null, editedBy = null, type = null, priority = null) =>
-    api.post(`/api/requirements/${id}/edit`, { edited_text: editedText, reason, edited_by: editedBy, type, priority }),
+  edit: (id, editedText, reason = null, editedBy = null, type = null, priority = null, discipline = null, verification_method = null, deadline = null) =>
+    api.post(`/api/requirements/${id}/edit`, { edited_text: editedText, reason, edited_by: editedBy, type, priority, discipline, verification_method, deadline }),
   assign: (id, assigneeId) =>
     api.post(`/api/requirements/${id}/assign`, { assignee_id: assigneeId }),
   setStatus: (id, status) =>
     api.post(`/api/requirements/${id}/set-status`, { status }),
   getComments: (id) => api.get(`/api/requirements/${id}/comments`),
+  getHistory: (id) => api.get(`/api/requirements/${id}/history`),
   addComment: (id, text) => api.post(`/api/requirements/${id}/comments`, { text }),
   deleteComment: (commentId) => api.delete(`/api/comments/${commentId}`),
+  createLink: (requirementId, targetRequirementId, linkType) =>
+    api.post(`/api/requirements/${requirementId}/links`, { target_requirement_id: targetRequirementId, link_type: linkType }),
+  deleteLink: (requirementId, linkId) =>
+    api.delete(`/api/requirements/${requirementId}/links/${linkId}`),
 }
 
 // Auth API
@@ -124,6 +134,7 @@ export const exportUrls = {
   word: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/word`,
   json: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/json`,
   txt: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/txt`,
+  xlsx: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/xlsx`,
   pdf: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/pdf`,
 }
 

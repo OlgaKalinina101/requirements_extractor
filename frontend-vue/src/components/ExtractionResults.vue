@@ -150,6 +150,29 @@
             </v-btn>
           </template>
         </v-list-item>
+
+        <v-list-item
+          :href="xlsxUrl"
+          target="_blank"
+          class="download-item"
+        >
+          <template v-slot:prepend>
+            <v-icon color="success">mdi-file-excel</v-icon>
+          </template>
+
+          <v-list-item-title>Excel (XLSX)</v-list-item-title>
+          <v-list-item-subtitle>Реестр требований с полной структурой</v-list-item-subtitle>
+
+          <template v-slot:append>
+            <v-btn
+              icon
+              variant="text"
+              size="small"
+            >
+              <v-icon>mdi-download</v-icon>
+            </v-btn>
+          </template>
+        </v-list-item>
       </v-list>
 
       <v-alert
@@ -217,6 +240,7 @@ const displayModelName = computed(() => {
 const wordUrl = computed(() => props.results?.document_id ? exportUrls.word(props.results.document_id) : null)
 const jsonUrl = computed(() => props.results?.document_id ? exportUrls.json(props.results.document_id) : null)
 const txtUrl = computed(() => props.results?.document_id ? exportUrls.txt(props.results.document_id) : null)
+const xlsxUrl = computed(() => props.results?.document_id ? exportUrls.xlsx(props.results.document_id) : null)
 </script>
 
 <style scoped>

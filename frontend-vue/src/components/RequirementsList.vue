@@ -9,7 +9,7 @@
         :requirement="requirement"
       @accept="$emit('accept', requirement.id)"
       @reject="$emit('reject', requirement.id, $event)"
-      @edit="$emit('edit', requirement.id, $event.text, $event.reason, $event.type, $event.priority)"
+      @edit="$emit('edit', requirement.id, $event.text, $event.reason, $event.type, $event.priority, $event.discipline, $event.verification_method, $event.deadline)"
       @view-page="$emit('view-page', $event)"
       @assigned="$emit('assigned', $event)"
       @status-changed="$emit('status-changed', $event)"

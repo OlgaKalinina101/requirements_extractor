@@ -7,7 +7,8 @@ export const useRequirementsStore = defineStore('requirements', {
     currentRequirement: null,
     filters: {
       status: null,
-      type: null
+      type: null,
+      discipline: null
     },
     loading: false,
     error: null
@@ -23,6 +24,10 @@ export const useRequirementsStore = defineStore('requirements', {
 
       if (state.filters.type) {
         filtered = filtered.filter(r => r.type === state.filters.type)
+      }
+
+      if (state.filters.discipline) {
+        filtered = filtered.filter(r => r.discipline === state.filters.discipline)
       }
 
       return filtered
@@ -107,9 +112,9 @@ export const useRequirementsStore = defineStore('requirements', {
       }
     },
 
-    async editRequirement(id, editedText, reason = null, editedBy = null, type = null, priority = null) {
+    async editRequirement(id, editedText, reason = null, editedBy = null, type = null, priority = null, discipline = null, verification_method = null, deadline = null) {
       try {
-        const response = await requirementsApi.edit(id, editedText, reason, editedBy, type, priority)
+        const response = await requirementsApi.edit(id, editedText, reason, editedBy, type, priority, discipline, verification_method, deadline)
         // Update local state
         const req = this.requirements.find(r => r.id === id)
         if (req) {
@@ -121,6 +126,9 @@ export const useRequirementsStore = defineStore('requirements', {
           req.edited_at = response.data.edited_at
           if (type) req.type = type
           if (priority) req.priority = priority
+          if (discipline !== undefined) req.discipline = discipline
+          if (verification_method !== undefined) req.verification_method = verification_method
+          if (deadline !== undefined) req.deadline = deadline
         }
         return response.data
       } catch (error) {
