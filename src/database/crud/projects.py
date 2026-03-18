@@ -13,6 +13,7 @@ def create_project(
     name: str,
     code: Optional[str] = None,
     description: Optional[str] = None,
+    requirement_manager_id: Optional[int] = None,
 ) -> Project:
     """Create a new project."""
     db_project = Project(
@@ -20,6 +21,7 @@ def create_project(
         code=code,
         description=description,
         status="active",
+        requirement_manager_id=requirement_manager_id,
     )
     db.add(db_project)
     db.commit()
@@ -29,7 +31,12 @@ def create_project(
 
 def get_project(db: Session, project_id: int) -> Optional[Project]:
     """Get project by ID."""
-    return db.query(Project).filter(Project.id == project_id).first()
+    return (
+        db.query(Project)
+        .options(joinedload(Project.requirement_manager))
+        .filter(Project.id == project_id)
+        .first()
+    )
 
 
 def get_project_by_code(db: Session, code: str) -> Optional[Project]:
@@ -37,16 +44,15 @@ def get_project_by_code(db: Session, code: str) -> Optional[Project]:
     return db.query(Project).filter(Project.code == code).first()
 
 
-def get_all_projects(db: Session, skip: int = 0, limit: int = 100) -> List[Project]:
-    """Get all projects with pagination."""
-    return (
-        db.query(Project)
-        .options(joinedload(Project.documents).load_only(Document.id))
-        .order_by(Project.updated_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
+def get_all_projects(db: Session, skip: int = 0, limit: int = 100, project_id: Optional[int] = None) -> List[Project]:
+    """Get all projects with pagination. Optionally filter by project_id (single project)."""
+    q = db.query(Project).options(
+        joinedload(Project.documents).load_only(Document.id),
+        joinedload(Project.requirement_manager),
     )
+    if project_id is not None:
+        q = q.filter(Project.id == project_id)
+    return q.order_by(Project.updated_at.desc()).offset(skip).limit(limit).all()
 
 
 def get_project_counts(db: Session, project_ids: List[int]) -> Dict[int, Dict[str, int]]:
@@ -90,6 +96,7 @@ def update_project(
     code: Optional[str] = None,
     description: Optional[str] = None,
     status: Optional[str] = None,
+    requirement_manager_id: Optional[int] = None,
 ) -> Optional[Project]:
     """Update a project."""
     db_project = get_project(db, project_id)
@@ -103,6 +110,8 @@ def update_project(
         db_project.description = description
     if status is not None:
         db_project.status = status
+    if requirement_manager_id is not None:
+        db_project.requirement_manager_id = requirement_manager_id if requirement_manager_id else None
     db.commit()
     db.refresh(db_project)
     return db_project

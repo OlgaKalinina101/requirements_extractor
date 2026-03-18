@@ -431,7 +431,10 @@ const breadcrumbs = computed(() => [
 
 function goBack() {
   const r = requirement.value
-  if (r?.document_id) {
+  const from = route.query.from
+  if (from === 'requirements') {
+    router.push({ path: '/requirements', query: { fromReq: r?.id } })
+  } else if (r?.document_id) {
     const query = { scrollTo: r.id }
     if (r.page_number) query.page = r.page_number
     router.push({ path: `/review/${r.document_id}`, query })

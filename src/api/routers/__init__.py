@@ -12,6 +12,7 @@ from .dashboard import router as dashboard_router
 from .download import router as download_router
 from .dictionaries import router as dictionaries_router
 from .comments import router as comments_router
+from .prompts import router as prompts_router
 
 __all__ = [
     "health_router",
@@ -26,4 +27,5 @@ __all__ = [
     "download_router",
     "dictionaries_router",
     "comments_router",
+    "prompts_router",
 ]

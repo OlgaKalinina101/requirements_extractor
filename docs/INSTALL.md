@@ -86,6 +86,23 @@ Frontend запустится на `http://localhost:5173`
 
 ## Миграции БД
 
+### Через Docker (рекомендуется)
+
+Миграции применяются автоматически при старте API-контейнера. Для ручного запуска:
+
+```bash
+# Применить все миграции
+docker compose run --rm api alembic upgrade head
+
+# Откатить последнюю
+docker compose run --rm api alembic downgrade -1
+
+# Статус
+docker compose run --rm api alembic current
+```
+
+### Локально (без Docker)
+
 ```bash
 # Применить все миграции
 alembic upgrade head

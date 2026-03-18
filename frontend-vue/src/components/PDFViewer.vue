@@ -117,7 +117,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import { exportUrls } from '@/services/api'
 
-// Configure PDF.js worker
+// Worker from CDN (bundled worker fails in Docker/nginx due to .mjs MIME type)
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
 
 const props = defineProps({
@@ -193,7 +193,7 @@ const loadPDF = async () => {
     loading.value = false
     emit('loaded')
   } catch (err) {
-    error.value = `Не удалось загрузить PDF: ${err.message}`
+    error.value = `Не удалось загрузить PDF: ${err?.message || err}`
     loading.value = false
   }
 }
@@ -214,7 +214,7 @@ const renderPage = async (pageNum) => {
     
     await currentPageObj.render({ canvasContext: context, viewport }).promise
   } catch (err) {
-    error.value = `Ошибка рендеринга страницы ${pageNum}`
+    error.value = `Ошибка рендеринга страницы ${pageNum}: ${err?.message || err}`
   }
 }
 

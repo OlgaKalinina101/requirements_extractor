@@ -31,7 +31,7 @@ async def create_user(
     """Create a new user. Admin only."""
     if crud.get_user_by_email(db, request.email):
         raise HTTPException(status_code=400, detail="Email already registered")
-    if request.role not in ("admin", "manager", "user"):
+    if request.role not in ("admin", "manager", "department_head", "user"):
         raise HTTPException(status_code=400, detail="Invalid role")
     user = crud.create_user(
         db,

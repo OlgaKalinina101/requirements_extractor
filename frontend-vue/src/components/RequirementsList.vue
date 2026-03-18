@@ -7,6 +7,7 @@
     >
       <RequirementCard
         :requirement="requirement"
+        :show-detail-link="showDetailLink"
       @accept="$emit('accept', requirement.id)"
       @reject="$emit('reject', requirement.id, $event)"
       @edit="$emit('edit', requirement.id, $event.text, $event.reason, $event.type, $event.priority, $event.discipline, $event.verification_method, $event.deadline)"
@@ -22,7 +23,8 @@
 import RequirementCard from './RequirementCard.vue'
 
 defineProps({
-  requirements: { type: Array, required: true }
+  requirements: { type: Array, required: true },
+  showDetailLink: { type: Boolean, default: true },
 })
 
 defineEmits(['accept', 'reject', 'edit', 'view-page', 'assigned', 'status-changed'])

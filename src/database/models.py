@@ -32,7 +32,7 @@ Base = declarative_base()
 class User(Base):
     """User model - for authentication and role-based access.
 
-    Roles: admin, manager, user
+    Roles: admin, manager, department_head, user
     """
     __tablename__ = "users"
 
@@ -40,7 +40,7 @@ class User(Base):
     email = Column(String(255), nullable=False, unique=True, index=True)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
-    role = Column(String(50), default="user", nullable=False)  # admin, manager, user
+    role = Column(String(50), default="user", nullable=False)  # admin, manager, department_head, user
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=func.now(), nullable=False)
 
@@ -64,11 +64,13 @@ class Project(Base):
     code = Column(String(100), nullable=True, unique=True, index=True)
     description = Column(Text, nullable=True)
     status = Column(String(50), default="active", nullable=False)
+    requirement_manager_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relationships
     documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
+    requirement_manager = relationship("User", foreign_keys=[requirement_manager_id])
 
 
 class Document(Base):

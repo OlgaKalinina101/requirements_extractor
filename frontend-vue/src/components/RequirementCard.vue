@@ -99,10 +99,10 @@
       </v-expansion-panels>
     </v-card-text>
 
-    <v-divider />
+    <v-divider v-if="showDetailLink" />
 
-    <!-- Always visible: open detail page with comments -->
-    <v-card-actions class="px-3 py-1">
+    <!-- Подробнее — только на экране требований, не на review -->
+    <v-card-actions v-if="showDetailLink" class="px-3 py-1">
       <v-btn
         size="small"
         variant="text"
@@ -113,7 +113,7 @@
       </v-btn>
     </v-card-actions>
 
-    <v-divider />
+    <v-divider v-if="showDetailLink" />
 
     <!-- Assignment & execution status row — always visible -->
     <v-card-actions class="px-3 py-2 flex-wrap ga-2">
@@ -313,6 +313,7 @@ const documentId = inject('documentId', ref(null))
 
 const props = defineProps({
   requirement: { type: Object, required: true },
+  showDetailLink: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['accept', 'reject', 'edit', 'view-page', 'assigned', 'status-changed'])

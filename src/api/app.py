@@ -94,6 +94,7 @@ def create_app() -> FastAPI:
         download_router,
         dictionaries_router,
         comments_router,
+        prompts_router,
     )
 
     app.include_router(health_router)
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(download_router, prefix="/api/download")
     app.include_router(dictionaries_router, prefix="/api/dictionaries")
     app.include_router(comments_router, prefix="/api/comments")
+    app.include_router(prompts_router, prefix="/api/prompts")
 
     return app
 

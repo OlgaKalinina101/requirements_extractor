@@ -11,6 +11,12 @@
       <v-btn variant="text" to="/dashboard" prepend-icon="mdi-view-dashboard">
         Дашборд
       </v-btn>
+      <v-btn variant="text" to="/requirements" prepend-icon="mdi-format-list-checks">
+        Требования
+      </v-btn>
+      <v-btn v-if="auth.isAdmin" variant="text" to="/activity" prepend-icon="mdi-history">
+        Активность
+      </v-btn>
       <v-btn variant="text" to="/" prepend-icon="mdi-folder-multiple">
         Проекты
       </v-btn>
@@ -22,6 +28,9 @@
       </v-btn>
       <v-btn v-if="auth.isAdmin" variant="text" to="/users" prepend-icon="mdi-account-group">
         Пользователи
+      </v-btn>
+      <v-btn v-if="auth.isAdmin" variant="text" to="/prompts" prepend-icon="mdi-text-box-outline">
+        Промпты
       </v-btn>
 
       <!-- User menu -->
@@ -97,12 +106,14 @@ watch(() => auth.isAuthenticated, (val) => {
 const roleColor = computed(() => {
   if (auth.role === 'admin') return 'error'
   if (auth.role === 'manager') return 'primary'
+  if (auth.role === 'department_head') return 'teal'
   return 'secondary'
 })
 
 const roleName = computed(() => {
   if (auth.role === 'admin') return 'Администратор'
   if (auth.role === 'manager') return 'Менеджер'
+  if (auth.role === 'department_head') return 'Руководитель отдела по задачам'
   return 'Пользователь'
 })
 

@@ -70,7 +70,17 @@
                 <v-icon left>mdi-clipboard-list</v-icon>
                 Требования
                 <v-spacer></v-spacer>
-                <v-chip size="small" color="primary">
+                <v-btn
+                  v-if="auth.isManager"
+                  size="small"
+                  variant="tonal"
+                  color="primary"
+                  prepend-icon="mdi-plus"
+                  @click="showAddRequirementDialog = true"
+                >
+                  Добавить
+                </v-btn>
+                <v-chip size="small" color="primary" class="ml-2">
                   {{ requirementsStore.filteredRequirements.length }} / {{ requirementsStore.requirements.length }}
                 </v-chip>
               </v-card-title>
@@ -92,6 +102,7 @@
                 <RequirementsList
                   v-else
                   :requirements="requirementsStore.filteredRequirements"
+                  :show-detail-link="false"
                   @accept="handleAccept"
                   @reject="handleReject"
                   @edit="handleEdit"
@@ -208,6 +219,82 @@
         </v-row>
       </v-col>
     </v-row>
+
+    <!-- Add requirement dialog -->
+    <v-dialog v-model="showAddRequirementDialog" max-width="600" persistent>
+      <v-card>
+        <v-card-title>Новое требование</v-card-title>
+        <v-card-text>
+          <v-textarea
+            v-model="newRequirement.text"
+            label="Текст требования *"
+            rows="4"
+            :rules="[v => !!v?.trim() || 'Обязательное поле']"
+          />
+          <v-text-field
+            v-model="newRequirement.requirement_id"
+            label="Идентификатор (REQ-...)"
+            hint="Оставьте пустым для авто-генерации"
+            persistent-hint
+            class="mt-2"
+          />
+          <v-row class="mt-2">
+            <v-col cols="6">
+              <v-select
+                v-model="newRequirement.type"
+                :items="typeOptions"
+                item-title="title"
+                item-value="value"
+                label="Тип"
+                clearable
+                density="compact"
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-select
+                v-model="newRequirement.priority"
+                :items="priorityOptions"
+                item-title="title"
+                item-value="value"
+                label="Приоритет"
+                clearable
+                density="compact"
+              />
+            </v-col>
+          </v-row>
+          <v-select
+            v-model="newRequirement.discipline"
+            :items="dicts.disciplineOptions || []"
+            item-title="title"
+            item-value="value"
+            label="Дисциплина"
+            clearable
+            density="compact"
+            class="mt-2"
+          />
+          <v-text-field
+            v-model.number="newRequirement.page_number"
+            label="Номер страницы"
+            type="number"
+            min="1"
+            density="compact"
+            class="mt-2"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="showAddRequirementDialog = false">Отмена</v-btn>
+          <v-btn
+            color="primary"
+            :disabled="!newRequirement.text?.trim()"
+            :loading="creatingRequirement"
+            @click="createRequirement"
+          >
+            Создать
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -237,6 +324,16 @@ const statusFilter = ref(null)
 const typeFilter = ref(null)
 const disciplineFilter = ref(null)
 const onlyMine = ref(false)
+const showAddRequirementDialog = ref(false)
+const creatingRequirement = ref(false)
+const newRequirement = ref({
+  text: '',
+  requirement_id: '',
+  type: null,
+  priority: null,
+  discipline: '',
+  page_number: null,
+})
 
 // Users list for assignee dropdowns in RequirementCard
 const users = ref([])
@@ -245,7 +342,8 @@ provide('documentId', computed(() => route.params.documentId))
 
 // Filter options come from the dictionaries store (loaded from DB)
 const statusOptions = computed(() => dicts.statusOptions)
-const typeOptions   = computed(() => dicts.typeOptions)
+const typeOptions = computed(() => dicts.typeOptions)
+const priorityOptions = computed(() => dicts.priorityOptions)
 const disciplineOptions = computed(() => {
   const disciplines = new Set()
   requirementsStore.requirements.forEach(r => {
@@ -299,6 +397,29 @@ const handleEdit = async (requirementId, editedText, reason, type = null, priori
   try {
     await requirementsStore.editRequirement(requirementId, editedText, reason, null, type, priority, discipline, verification_method, deadline)
   } catch { /* store handles error */ }
+}
+
+const createRequirement = async () => {
+  const documentId = route.params.documentId
+  if (!documentId || !newRequirement.value.text?.trim()) return
+  creatingRequirement.value = true
+  try {
+    const data = {
+      text: newRequirement.value.text.trim(),
+      requirement_id: newRequirement.value.requirement_id?.trim() || undefined,
+      type: newRequirement.value.type || undefined,
+      priority: newRequirement.value.priority || undefined,
+      discipline: newRequirement.value.discipline?.trim() || undefined,
+      page_number: newRequirement.value.page_number || undefined,
+    }
+    await requirementsStore.createRequirement(documentId, data)
+    showAddRequirementDialog.value = false
+    newRequirement.value = { text: '', requirement_id: '', type: null, priority: null, discipline: '', page_number: null }
+  } catch (e) {
+    // Store handles error; could show notification
+  } finally {
+    creatingRequirement.value = false
+  }
 }
 
 const jumpToPdfPage = (pageNumber) => {

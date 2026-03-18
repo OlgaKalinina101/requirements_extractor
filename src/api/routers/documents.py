@@ -5,9 +5,10 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, Response
 
+from src.api.schemas import CreateRequirementRequest
 from src.api.serializers import (
     document_to_dict,
     document_to_list_item,
@@ -17,7 +18,7 @@ from src.api.serializers import (
 from src.database.database import get_db
 from src.database import crud
 from src.models import RequirementType
-from src.auth.dependencies import get_current_user
+from src.auth.dependencies import get_current_user, require_manager
 
 router = APIRouter(tags=["documents"])
 logger = logging.getLogger("api")
@@ -57,6 +58,45 @@ async def get_document(document_id: int, db=Depends(get_db)):
     except Exception as e:
         logger.error(f"Failed to get document {document_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{document_id}/requirements", status_code=201)
+async def create_requirement(
+    document_id: int,
+    request: CreateRequirementRequest,
+    db=Depends(get_db),
+    _current=Depends(require_manager),
+):
+    """Manually create a new requirement for a document. Manager/admin only."""
+    document = crud.get_document(db, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    req_id = request.requirement_id
+    if not req_id:
+        req_id = crud._next_manual_requirement_id(db, document_id)
+    # Check uniqueness within document
+    from src.database.models import Requirement
+    existing = db.query(Requirement).filter(
+        Requirement.document_id == document_id,
+        Requirement.requirement_id == req_id,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Requirement ID '{req_id}' already exists in this document")
+    req = crud.create_requirement(
+        db=db,
+        document_id=document_id,
+        requirement_id=req_id,
+        text=request.text,
+        ai_suggested=request.text,
+        type=request.type,
+        priority=request.priority,
+        page_number=request.page_number,
+    )
+    if request.discipline:
+        req.discipline = request.discipline
+        db.commit()
+        db.refresh(req)
+    return requirement_to_list_item(req)
 
 
 @router.get("/{document_id}/requirements")
@@ -132,9 +172,9 @@ async def get_metrics(document_id: int, db=Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{document_id}/pdf")
-async def get_document_pdf(document_id: int, db=Depends(get_db)):
-    """Get PDF file for document viewer."""
+@router.api_route("/{document_id}/pdf", methods=["GET", "HEAD"])
+async def get_document_pdf(document_id: int, request: Request, db=Depends(get_db)):
+    """Get PDF file for document viewer. HEAD supported for content-type check."""
     try:
         document = crud.get_document(db, document_id)
         if not document:
@@ -142,6 +182,8 @@ async def get_document_pdf(document_id: int, db=Depends(get_db)):
         file_path = Path(document.file_path)
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="PDF file not found")
+        if request.method == "HEAD":
+            return Response(headers={"Content-Type": "application/pdf", "Content-Disposition": "inline"})
         return FileResponse(
             path=file_path,
             media_type="application/pdf",

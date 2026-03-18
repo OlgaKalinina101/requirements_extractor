@@ -7,6 +7,9 @@ import ReviewView from '../views/ReviewView.vue'
 import AdminView from '../views/AdminView.vue'
 import RequirementDetailView from '../views/RequirementDetailView.vue'
 import DashboardRouterView from '../views/DashboardRouterView.vue'
+import ActivityView from '../views/ActivityView.vue'
+import AllRequirementsView from '../views/AllRequirementsView.vue'
+import PromptsView from '../views/PromptsView.vue'
 import LoginView from '../views/LoginView.vue'
 import UsersView from '../views/UsersView.vue'
 
@@ -66,6 +69,23 @@ const routes = [
     path: '/dashboard',
     name: 'dashboard',
     component: DashboardRouterView
+  },
+  {
+    path: '/activity',
+    name: 'activity',
+    component: ActivityView,
+    meta: { requiresRole: 'admin' }
+  },
+  {
+    path: '/prompts',
+    name: 'prompts',
+    component: PromptsView,
+    meta: { requiresRole: 'admin' }
+  },
+  {
+    path: '/requirements',
+    name: 'all-requirements',
+    component: AllRequirementsView,
   }
 ]
 

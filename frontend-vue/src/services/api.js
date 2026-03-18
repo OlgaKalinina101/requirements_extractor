@@ -36,18 +36,20 @@ api.interceptors.response.use(
 
 // Dashboard API (manager)
 export const dashboardApi = {
-  getStats: () => api.get('/api/dashboard'),
+  getStats: (params = {}) => api.get('/api/dashboard', { params }),
+  getActivity: (params = {}) => api.get('/api/dashboard/activity', { params }),
 }
 
 // Projects API
 export const projectsApi = {
-  getAll: () => api.get('/api/projects'),
+  getAll: (params = {}) => api.get('/api/projects', { params }),
   getById: (id) => api.get(`/api/projects/${id}`),
-  create: (name, code = null, description = null) => {
+  create: (name, code = null, description = null, requirement_manager_id = null) => {
     const formData = new FormData()
     formData.append('name', name)
     if (code) formData.append('code', code)
     if (description) formData.append('description', description)
+    if (requirement_manager_id != null && requirement_manager_id !== '') formData.append('requirement_manager_id', requirement_manager_id)
     return api.post('/api/projects', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
@@ -56,6 +58,7 @@ export const projectsApi = {
     const formData = new FormData()
     Object.entries(data).forEach(([key, value]) => {
       if (value !== null && value !== undefined) formData.append(key, value)
+      else if (key === 'requirement_manager_id') formData.append(key, 0)  // 0 = clear
     })
     return api.put(`/api/projects/${id}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
@@ -88,7 +91,10 @@ export const documentsApi = {
   
   getRequirements: (documentId, params = {}) =>
     api.get(`/api/documents/${documentId}/requirements`, { params }),
-  
+
+  createRequirement: (documentId, data) =>
+    api.post(`/api/documents/${documentId}/requirements`, data),
+
   getMetrics: (documentId) => {
     return api.get(`/api/documents/${documentId}/metrics`)
   }
@@ -96,6 +102,8 @@ export const documentsApi = {
 
 // Requirements API
 export const requirementsApi = {
+  getAll: (params = {}) => api.get('/api/requirements', { params }),
+  delete: (id) => api.delete(`/api/requirements/${id}`),
   getById: (id) => api.get(`/api/requirements/${id}`),
   accept: (id) => api.post(`/api/requirements/${id}/accept`),
   reject: (id, reason = null) => api.post(`/api/requirements/${id}/reject`, reason ? { reason } : {}),
@@ -119,6 +127,11 @@ export const requirementsApi = {
 export const authApi = {
   login: (email, password) => api.post('/api/auth/login', { email, password }),
   me: () => api.get('/api/auth/me'),
+}
+
+// Prompts API (admin)
+export const promptsApi = {
+  getAll: () => api.get('/api/prompts'),
 }
 
 // Users API (admin)

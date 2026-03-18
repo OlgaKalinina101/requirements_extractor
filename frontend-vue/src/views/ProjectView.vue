@@ -35,6 +35,22 @@
           <div v-if="project.description" class="text-body-2 text-medium-emphasis mt-1">
             {{ project.description }}
           </div>
+          <div v-if="auth.isManager" class="mt-3">
+            <v-card variant="outlined" class="pa-3">
+              <div class="text-caption text-medium-emphasis mb-2">Менеджер требований</div>
+              <v-select
+                :model-value="editRequirementManagerId"
+                @update:model-value="onRequirementManagerChange"
+                :items="userSelectOptions"
+                item-title="title"
+                item-value="value"
+                density="compact"
+                hide-details
+                clearable
+                style="max-width: 300px"
+              />
+            </v-card>
+          </div>
         </v-col>
       </v-row>
 
@@ -108,11 +124,14 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectsStore } from '../stores/projects'
+import { useAuthStore } from '@/stores/auth'
+import { usersApi } from '@/services/api'
 import DocumentUpload from '../components/DocumentUpload.vue'
 
 const route = useRoute()
 const router = useRouter()
 const projectsStore = useProjectsStore()
+const auth = useAuthStore()
 
 const props = defineProps({
   projectId: { type: [String, Number], required: true }
@@ -121,11 +140,30 @@ const props = defineProps({
 const loading = ref(false)
 const project = ref(null)
 const showingResults = ref(false)
+const userSelectOptions = ref([{ title: 'Не назначен', value: null }])
+const savingRequirementManager = ref(false)
+
+const editRequirementManagerId = computed(() => project.value?.requirement_manager_id ?? null)
 
 const breadcrumbs = computed(() => [
   { title: 'Проекты', to: '/', disabled: false },
   { title: project.value?.name || '...', disabled: true },
 ])
+
+const onRequirementManagerChange = async (value) => {
+  if (!project.value || savingRequirementManager.value) return
+  savingRequirementManager.value = true
+  try {
+    const updated = await projectsStore.updateProject(project.value.id, {
+      requirement_manager_id: value ?? 0,
+    })
+    project.value = { ...project.value, ...updated }
+  } catch (e) {
+    console.error('Failed to update requirement manager', e)
+  } finally {
+    savingRequirementManager.value = false
+  }
+}
 
 const refreshProject = async () => {
   loading.value = true
@@ -193,7 +231,21 @@ const goToReview = (documentId) => {
 
 watch(() => props.projectId, () => { refreshProject() })
 
-onMounted(() => {
+onMounted(async () => {
+  if (auth.isManager) {
+    try {
+      const { data } = await usersApi.getAll()
+      userSelectOptions.value = [
+        { title: 'Не назначен', value: null },
+        ...(data || []).filter(u => u.is_active !== false).map(u => ({
+          title: u.full_name || u.email,
+          value: u.id,
+        })),
+      ]
+    } catch (e) {
+      console.error('Failed to load users', e)
+    }
+  }
   refreshProject()
 })
 </script>

@@ -9,7 +9,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!token.value)
   const role = computed(() => user.value?.role || null)
   const isAdmin = computed(() => role.value === 'admin')
-  const isManager = computed(() => ['admin', 'manager'].includes(role.value))
+  const isManager = computed(() => ['admin', 'manager', 'department_head'].includes(role.value))
 
   async function login(email, password) {
     const { data } = await api.post('/api/auth/login', { email, password })

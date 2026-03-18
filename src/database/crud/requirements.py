@@ -12,6 +12,82 @@ from src.models import RequirementType
 logger = logging.getLogger("api")
 
 
+def delete_requirement(db: Session, requirement_id: int) -> bool:
+    """Hard-delete a requirement by ID. Returns True if deleted."""
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        return False
+    db.delete(req)
+    db.commit()
+    return True
+
+
+def get_all_requirements(
+    db: Session,
+    project_id: Optional[int] = None,
+    document_id: Optional[int] = None,
+    assignee_id: Optional[int] = None,
+    discipline: Optional[str] = None,
+    status: Optional[str] = None,
+    req_type: Optional[str] = None,
+    priority: Optional[str] = None,
+    search: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 500,
+):
+    """Get all requirements across all documents with optional filters."""
+    from src.database.models import Document, Project
+
+    q = (
+        db.query(Requirement)
+        .join(Document, Requirement.document_id == Document.id)
+        .outerjoin(Project, Document.project_id == Project.id)
+        .options(
+            joinedload(Requirement.document),
+            joinedload(Requirement.section),
+            joinedload(Requirement.parent),
+            joinedload(Requirement.children),
+            joinedload(Requirement.outgoing_links).joinedload(RequirementLink.target_requirement),
+            joinedload(Requirement.incoming_links).joinedload(RequirementLink.source_requirement),
+        )
+    )
+    if project_id is not None:
+        q = q.filter(Document.project_id == project_id)
+    if document_id is not None:
+        q = q.filter(Requirement.document_id == document_id)
+    if assignee_id is not None:
+        q = q.filter(Requirement.assignee_id == assignee_id)
+    if discipline:
+        q = q.filter(Requirement.discipline == discipline)
+    if status:
+        q = q.filter(Requirement.status == status)
+    if req_type:
+        q = q.filter(Requirement.type == req_type)
+    if priority:
+        q = q.filter(Requirement.priority == priority)
+    if search:
+        q = q.filter(Requirement.text.ilike(f"%{search}%"))
+    q = q.order_by(Document.project_id, Requirement.document_id, Requirement.id)
+    return q.offset(skip).limit(limit).all()
+
+
+def _next_manual_requirement_id(db: Session, document_id: int) -> str:
+    """Generate next REQ-MAN-XXX ID for manually added requirements."""
+    import re
+    existing = (
+        db.query(Requirement.requirement_id)
+        .filter(Requirement.document_id == document_id)
+        .filter(Requirement.requirement_id.like("REQ-MAN-%"))
+        .all()
+    )
+    max_num = 0
+    for (rid,) in existing:
+        m = re.search(r"REQ-MAN-(\d+)$", rid or "")
+        if m:
+            max_num = max(max_num, int(m.group(1)))
+    return f"REQ-MAN-{max_num + 1:03d}"
+
+
 def create_requirement(
     db: Session,
     document_id: int,

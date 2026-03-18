@@ -139,6 +139,42 @@ export const useRequirementsStore = defineStore('requirements', {
 
     setFilters(filters) {
       this.filters = { ...this.filters, ...filters }
-    }
+    },
+
+    async createRequirement(documentId, data) {
+      try {
+        const response = await documentsApi.createRequirement(documentId, data)
+        this.requirements.push(response.data)
+        return response.data
+      } catch (error) {
+        this.error = error.message
+        throw error
+      }
+    },
+
+    async deleteRequirement(id) {
+      try {
+        await requirementsApi.delete(id)
+        this.requirements = this.requirements.filter(r => r.id !== id)
+      } catch (error) {
+        this.error = error.message
+        throw error
+      }
+    },
+
+    async fetchAllRequirements(params = {}) {
+      this.loading = true
+      this.error = null
+      try {
+        const response = await requirementsApi.getAll(params)
+        this.requirements = response.data.requirements || []
+        return this.requirements
+      } catch (error) {
+        this.error = error.message
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
   }
 })

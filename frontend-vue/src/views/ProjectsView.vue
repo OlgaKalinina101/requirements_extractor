@@ -63,6 +63,10 @@
           </v-card-subtitle>
 
           <v-card-text>
+            <div class="text-caption text-medium-emphasis mb-2">
+              <v-icon size="small" class="mr-1">mdi-account-cog</v-icon>
+              Менеджер требований: {{ project.requirement_manager_name || 'не назначен' }}
+            </div>
             <div v-if="project.description" class="text-body-2 mb-3 description-text">
               {{ project.description }}
             </div>
@@ -116,6 +120,15 @@
             rows="3"
             class="mt-2"
           />
+          <v-select
+            v-model="newProject.requirement_manager_id"
+            :items="userSelectOptions"
+            item-title="title"
+            item-value="value"
+            label="Менеджер требований"
+            clearable
+            class="mt-2"
+          />
         </v-card-text>
         <v-card-actions>
           <v-spacer />
@@ -155,6 +168,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectsStore } from '../stores/projects'
 import { useAuthStore } from '@/stores/auth'
+import { usersApi } from '@/services/api'
 
 const router = useRouter()
 const projectsStore = useProjectsStore()
@@ -164,7 +178,12 @@ const showCreateDialog = ref(false)
 const showDeleteDialog = ref(false)
 const projectToDelete = ref(null)
 const creating = ref(false)
-const newProject = ref({ name: '', code: '', description: '' })
+const newProject = ref({ name: '', code: '', description: '', requirement_manager_id: null })
+const usersForSelect = ref([])
+
+const userSelectOptions = ref([
+  { title: 'Не назначен', value: null },
+])
 
 const formatDate = (dateString) => {
   if (!dateString) return ''
@@ -183,10 +202,11 @@ const createProject = async () => {
     const created = await projectsStore.createProject(
       newProject.value.name,
       newProject.value.code || null,
-      newProject.value.description || null
+      newProject.value.description || null,
+      newProject.value.requirement_manager_id || null
     )
     showCreateDialog.value = false
-    newProject.value = { name: '', code: '', description: '' }
+    newProject.value = { name: '', code: '', description: '', requirement_manager_id: null }
     router.push(`/projects/${created.id}`)
   } catch (e) {
     alert(projectsStore.error || 'Ошибка создания проекта')
@@ -211,8 +231,22 @@ const doDelete = async () => {
   projectToDelete.value = null
 }
 
-onMounted(() => {
+onMounted(async () => {
   projectsStore.fetchProjects()
+  if (auth.isManager) {
+    try {
+      const { data } = await usersApi.getAll()
+      userSelectOptions.value = [
+        { title: 'Не назначен', value: null },
+        ...(data || []).filter(u => u.is_active !== false).map(u => ({
+          title: u.full_name || u.email,
+          value: u.id,
+        })),
+      ]
+    } catch (e) {
+      console.error('Failed to load users for project form', e)
+    }
+  }
 })
 </script>
 

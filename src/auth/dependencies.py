@@ -62,4 +62,4 @@ def require_role(allowed_roles: List[str]):
 
 # Shortcuts
 require_admin = require_role(["admin"])
-require_manager = require_role(["admin", "manager"])
+require_manager = require_role(["admin", "manager", "department_head"])

@@ -1,5 +1,7 @@
 """Projects API endpoints."""
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Form, HTTPException
 
 from src.api.serializers import project_to_dict, project_with_docs
@@ -12,11 +14,12 @@ router = APIRouter(tags=["projects"])
 
 @router.get("")
 async def get_projects(
+    project_id: Optional[int] = None,
     db=Depends(get_db),
     _current=Depends(get_current_user),
 ):
-    """Get all projects."""
-    projects = crud.get_all_projects(db)
+    """Get all projects. Optionally filter by project_id (returns single project in list)."""
+    projects = crud.get_all_projects(db, project_id=project_id)
     project_ids = [p.id for p in projects]
     counts = crud.get_project_counts(db, project_ids) if project_ids else {}
     result = []
@@ -31,6 +34,7 @@ async def create_project(
     name: str = Form(...),
     code: str = Form(None),
     description: str = Form(None),
+    requirement_manager_id: Optional[int] = Form(None),
     db=Depends(get_db),
     _current=Depends(get_current_user),
 ):
@@ -40,7 +44,7 @@ async def create_project(
         if existing:
             raise HTTPException(status_code=400, detail=f"Project with code '{code}' already exists")
 
-    project = crud.create_project(db, name=name, code=code, description=description)
+    project = crud.create_project(db, name=name, code=code, description=description, requirement_manager_id=requirement_manager_id)
     return project_to_dict(project, include_counts=False)
 
 
@@ -68,11 +72,16 @@ async def update_project(
     code: str = Form(None),
     description: str = Form(None),
     status: str = Form(None),
+    requirement_manager_id: Optional[int] = Form(None),
     db=Depends(get_db),
     _current=Depends(get_current_user),
 ):
     """Update a project."""
-    project = crud.update_project(db, project_id, name=name, code=code, description=description, status=status)
+    project = crud.update_project(
+        db, project_id,
+        name=name, code=code, description=description, status=status,
+        requirement_manager_id=requirement_manager_id,
+    )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project_to_dict(project, include_counts=False)

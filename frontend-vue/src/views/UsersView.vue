@@ -125,11 +125,12 @@ const headers = [
 const roleOptions = [
   { label: 'Администратор', value: 'admin' },
   { label: 'Менеджер требований', value: 'manager' },
+  { label: 'Руководитель отдела по задачам', value: 'department_head' },
   { label: 'Пользователь (исполнитель)', value: 'user' },
 ]
 
 function roleColor(role) {
-  return role === 'admin' ? 'error' : role === 'manager' ? 'primary' : 'secondary'
+  return role === 'admin' ? 'error' : role === 'manager' ? 'primary' : role === 'department_head' ? 'teal' : 'secondary'
 }
 
 function roleName(role) {

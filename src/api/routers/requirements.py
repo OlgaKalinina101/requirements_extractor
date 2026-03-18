@@ -13,7 +13,7 @@ from src.api.schemas import (
     CommentRequest,
     CreateLinkRequest,
 )
-from src.api.serializers import requirement_to_dict, requirement_summary, comment_to_dict
+from src.api.serializers import requirement_to_dict, requirement_to_list_item, requirement_summary, comment_to_dict
 from src.database import crud
 from src.database.database import get_db
 from src.auth.dependencies import get_current_user, require_manager
@@ -24,6 +24,51 @@ logger = logging.getLogger("api")
 EXECUTION_STATUSES = {"in_progress", "done", "blocked"}
 MANAGER_STATUSES = {"pending", "accepted", "rejected", "modified"}
 ALL_STATUSES = EXECUTION_STATUSES | MANAGER_STATUSES
+
+
+@router.get("")
+async def get_all_requirements(
+    project_id: Optional[int] = None,
+    document_id: Optional[int] = None,
+    assignee_id: Optional[int] = None,
+    discipline: Optional[str] = None,
+    status: Optional[str] = None,
+    type: Optional[str] = None,
+    priority: Optional[str] = None,
+    search: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 500,
+    db=Depends(get_db),
+    _current=Depends(get_current_user),
+):
+    """Get all requirements across all documents with optional filters."""
+    reqs = crud.get_all_requirements(
+        db,
+        project_id=project_id,
+        document_id=document_id,
+        assignee_id=assignee_id,
+        discipline=discipline,
+        status=status,
+        req_type=type,
+        priority=priority,
+        search=search,
+        skip=skip,
+        limit=limit,
+    )
+    return {"requirements": [requirement_to_list_item(r) for r in reqs], "total": len(reqs)}
+
+
+@router.delete("/{requirement_id}")
+async def delete_requirement(
+    requirement_id: int,
+    db=Depends(get_db),
+    _current=Depends(require_manager),
+):
+    """Delete a requirement. Manager/admin only."""
+    deleted = crud.delete_requirement(db, requirement_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    return {"ok": True}
 
 
 @router.get("/{requirement_id}")
@@ -204,7 +249,7 @@ async def set_requirement_status(
                 detail="You can only update status of requirements assigned to you",
             )
     else:
-        if current_user.role not in ("admin", "manager"):
+        if current_user.role not in ("admin", "manager", "department_head"):
             raise HTTPException(status_code=403, detail="Manager role required")
 
     req = crud.update_requirement_status(db, requirement_id, request.status)

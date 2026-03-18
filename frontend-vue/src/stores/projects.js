@@ -38,11 +38,29 @@ export const useProjectsStore = defineStore('projects', {
       }
     },
 
-    async createProject(name, code = null, description = null) {
+    async createProject(name, code = null, description = null, requirement_manager_id = null) {
       this.loading = true
       this.error = null
       try {
-        const response = await projectsApi.create(name, code, description)
+        const response = await projectsApi.create(name, code, description, requirement_manager_id)
+        await this.fetchProjects()
+        return response.data
+      } catch (error) {
+        this.error = error.response?.data?.detail || error.message
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
+
+    async updateProject(id, data) {
+      this.loading = true
+      this.error = null
+      try {
+        const response = await projectsApi.update(id, data)
+        if (this.currentProject?.id === id) {
+          this.currentProject = { ...this.currentProject, ...response.data }
+        }
         await this.fetchProjects()
         return response.data
       } catch (error) {

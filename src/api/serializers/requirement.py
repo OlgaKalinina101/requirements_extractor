@@ -58,6 +58,12 @@ def requirement_to_dict(req) -> Dict[str, Any]:
 
 def requirement_to_list_item(req) -> Dict[str, Any]:
     """Convert Requirement model to list item dict (for document requirements)."""
+    doc = getattr(req, "document", None)
+    project = getattr(doc, "project", None) if doc else None
+    parent = getattr(req, "parent", None)
+    children = getattr(req, "children", []) or []
+    outgoing = getattr(req, "outgoing_links", []) or []
+    incoming = getattr(req, "incoming_links", []) or []
     return {
         "id": req.id,
         "requirement_id": req.requirement_id,
@@ -80,6 +86,17 @@ def requirement_to_list_item(req) -> Dict[str, Any]:
         "parent_id": getattr(req, "parent_id", None),
         "subitems": req.subitems if hasattr(req, "subitems") else None,
         "created_at": _iso(req.created_at),
+        # document / project context (populated when available via joinedload)
+        "document_id": req.document_id,
+        "document_filename": doc.filename if doc else None,
+        "project_id": project.id if project else None,
+        "project_name": project.name if project else None,
+        # hierarchy
+        "parent_requirement_id": parent.requirement_id if parent else None,
+        "children": [{"id": c.id, "requirement_id": c.requirement_id} for c in children],
+        # links (outgoing: this -> other, incoming: other -> this)
+        "outgoing_links": _serialize_links(outgoing, is_outgoing=True),
+        "incoming_links": _serialize_links(incoming, is_outgoing=False),
     }
 
 

@@ -6,6 +6,17 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class CreateRequirementRequest(BaseModel):
+    """Request model for manually creating a requirement."""
+
+    text: str = Field(..., description="Requirement text", min_length=1)
+    requirement_id: Optional[str] = Field(None, description="Custom ID (e.g. REQ-1-001). Auto-generated if omitted.")
+    type: Optional[str] = Field(None, description="Requirement type")
+    priority: Optional[str] = Field(None, description="Requirement priority")
+    discipline: Optional[str] = Field(None, description="Discipline")
+    page_number: Optional[int] = Field(None, description="Page number in document")
+
+
 class EditRequirementRequest(BaseModel):
     """Request model for editing a requirement."""
 

@@ -88,3 +88,5 @@ test_document.pdf
 
 # Node modules
 node_modules/
+
+dump_requirements.sql

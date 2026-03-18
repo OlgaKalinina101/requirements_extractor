@@ -33,6 +33,8 @@ from src.database.crud.requirements import (
     create_requirement,
     get_requirement,
     get_requirements_by_document,
+    get_all_requirements,
+    delete_requirement,
     accept_requirement,
     reject_requirement,
     edit_requirement,
@@ -55,7 +57,7 @@ from src.database.crud.comments import (
     delete_comment,
     delete_comment_by_id,
 )
-from src.database.crud.dashboard import get_dashboard_stats, get_my_dashboard_stats
+from src.database.crud.dashboard import get_dashboard_stats, get_my_dashboard_stats, get_recent_activity
 from src.database.crud.dictionaries import (
     VALID_DICT_TYPES,
     get_dictionary_items,
@@ -104,6 +106,8 @@ __all__ = [
     "create_requirement",
     "get_requirement",
     "get_requirements_by_document",
+    "get_all_requirements",
+    "delete_requirement",
     "accept_requirement",
     "reject_requirement",
     "edit_requirement",
@@ -125,6 +129,7 @@ __all__ = [
     # dashboard
     "get_dashboard_stats",
     "get_my_dashboard_stats",
+    "get_recent_activity",
     # dictionaries
     "VALID_DICT_TYPES",
     "get_dictionary_items",
