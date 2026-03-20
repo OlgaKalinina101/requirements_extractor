@@ -3,15 +3,17 @@
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+
+from src.auth.dependencies import get_current_user
 
 router = APIRouter(tags=["download"])
 logger = logging.getLogger("api")
 
 
 @router.get("")
-async def download_file(path: str) -> FileResponse:
+async def download_file(path: str, _current=Depends(get_current_user)) -> FileResponse:
     """Download generated file by path with security checks."""
     try:
         file_path = Path(path).absolute()

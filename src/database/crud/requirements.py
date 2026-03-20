@@ -205,6 +205,21 @@ def reject_requirement(
     return db_requirement
 
 
+def update_lifecycle_status(
+    db: Session,
+    requirement_id: int,
+    lifecycle_status: str,
+) -> Optional[Requirement]:
+    """Update requirement lifecycle status (Draft → In Review → Approved → …)."""
+    req = get_requirement(db, requirement_id)
+    if not req:
+        return None
+    req.lifecycle_status = lifecycle_status
+    db.commit()
+    db.refresh(req)
+    return req
+
+
 def edit_requirement(
     db: Session,
     requirement_id: int,
@@ -217,6 +232,7 @@ def edit_requirement(
     verification_method: Optional[str] = None,
     deadline=None,
     parent_id: Optional[int] = None,
+    lifecycle_status: Optional[str] = None,
 ) -> Optional[Requirement]:
     """Edit a requirement (mark as modified)."""
     db_requirement = get_requirement(db, requirement_id)
@@ -240,6 +256,8 @@ def edit_requirement(
         db_requirement.deadline = deadline
     if parent_id is not None:
         db_requirement.parent_id = parent_id
+    if lifecycle_status is not None:
+        db_requirement.lifecycle_status = lifecycle_status
     db.commit()
     db.refresh(db_requirement)
     return db_requirement

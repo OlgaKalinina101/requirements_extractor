@@ -22,7 +22,7 @@
           <v-icon size="64" color="error">mdi-alert-circle</v-icon>
           <div class="mt-4 text-h6">Ошибка загрузки PDF</div>
           <div class="text-body-2">{{ error }}</div>
-          <v-btn class="mt-4" color="primary" :href="pdfUrl" target="_blank">
+          <v-btn class="mt-4" color="primary" :href="blobUrl || pdfUrl" target="_blank">
             Открыть в новой вкладке
           </v-btn>
         </div>
@@ -34,7 +34,7 @@
 
         <!-- Image Container -->
         <div v-else class="image-container">
-          <img :src="pdfUrl" class="document-image" alt="Document" />
+          <img :src="blobUrl" class="document-image" alt="Document" />
         </div>
       </div>
 
@@ -43,7 +43,7 @@
           size="small"
           variant="tonal"
           color="primary"
-          :href="pdfUrl"
+          :href="blobUrl || pdfUrl"
           target="_blank"
           prepend-icon="mdi-open-in-new"
         >
@@ -115,7 +115,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
-import { exportUrls } from '@/services/api'
+import api, { exportUrls } from '@/services/api'
 
 // Worker from CDN (bundled worker fails in Docker/nginx due to .mjs MIME type)
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
@@ -152,6 +152,9 @@ const error = ref(null)
 const scale = ref(1.0)
 const isImageDocument = ref(false)
 
+// Blob URL created from authenticated fetch — used for pdf.js, img src, and "open in new tab"
+const blobUrl = ref(null)
+
 // PDF.js objects
 let pdfDocument = null
 let currentPageObj = null
@@ -161,35 +164,41 @@ const pdfUrl = computed(() => {
   return exportUrls.pdf(props.documentId)
 })
 
+// Fetch PDF bytes via axios (carries Authorization header), return { arrayBuffer, contentType }
+const fetchPdfWithAuth = async () => {
+  const response = await api.get(pdfUrl.value, { responseType: 'arraybuffer' })
+  const contentType = response.headers['content-type'] || 'application/pdf'
+  return { arrayBuffer: response.data, contentType }
+}
+
 // Load PDF document or image
 const loadPDF = async () => {
   try {
     loading.value = true
     error.value = null
-    
-    // Try to detect if this is an image by fetching headers
-    try {
-      const response = await fetch(pdfUrl.value, { method: 'HEAD' })
-      const contentType = response.headers.get('content-type')
-      
-      if (contentType && contentType.startsWith('image/')) {
-        isImageDocument.value = true
-        totalPages.value = 1
-        loading.value = false
-        emit('loaded')
-        return
-      }
-    } catch {
-      // Content-type check is best-effort; proceed with PDF loading
+
+    const { arrayBuffer, contentType } = await fetchPdfWithAuth()
+
+    // Create a blob URL so "open in new tab" and <img> also work without re-fetching
+    const blob = new Blob([arrayBuffer], { type: contentType })
+    blobUrl.value = URL.createObjectURL(blob)
+
+    if (contentType.startsWith('image/')) {
+      isImageDocument.value = true
+      totalPages.value = 1
+      loading.value = false
+      emit('loaded')
+      return
     }
-    
-    const loadingTask = pdfjsLib.getDocument(pdfUrl.value)
+
+    // Pass raw ArrayBuffer to pdf.js — no second HTTP request needed
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer })
     pdfDocument = await loadingTask.promise
-    
+
     totalPages.value = pdfDocument.numPages
-    
+
     await renderPage(currentPage.value)
-    
+
     loading.value = false
     emit('loaded')
   } catch (err) {
@@ -282,6 +291,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (pdfDocument) {
     pdfDocument.destroy()
+  }
+  if (blobUrl.value) {
+    URL.revokeObjectURL(blobUrl.value)
   }
 })
 </script>

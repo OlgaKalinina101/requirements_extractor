@@ -29,6 +29,7 @@ class EditRequirementRequest(BaseModel):
     verification_method: Optional[str] = Field(None, description="Verification method (Analysis, Test, etc.)")
     deadline: Optional[date] = Field(None, description="Due date for execution")
     parent_id: Optional[int] = Field(None, description="Parent requirement ID for hierarchy")
+    lifecycle_status: Optional[str] = Field(None, description="Lifecycle status (draft, in_review, approved, implemented, verified, rejected)")
 
 
 class RejectRequirementRequest(BaseModel):
@@ -47,6 +48,12 @@ class SetStatusRequest(BaseModel):
     """Request model for setting requirement status."""
 
     status: str = Field(..., description="New status")
+
+
+class SetLifecycleStatusRequest(BaseModel):
+    """Request model for setting requirement lifecycle status."""
+
+    lifecycle_status: str = Field(..., description="New lifecycle status (draft, in_review, approved, implemented, verified, rejected)")
 
 
 class CreateLinkRequest(BaseModel):

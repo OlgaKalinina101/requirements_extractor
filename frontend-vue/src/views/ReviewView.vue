@@ -11,24 +11,24 @@
         </v-chip>
         <v-menu v-if="documentsStore.currentDocument" location="bottom">
           <template v-slot:activator="{ props: menuProps }">
-            <v-btn v-bind="menuProps" variant="text" prepend-icon="mdi-download">
+            <v-btn v-bind="menuProps" variant="text" prepend-icon="mdi-download" :loading="exportLoading">
               Экспорт
             </v-btn>
           </template>
           <v-list density="compact">
-            <v-list-item :href="exportUrls.word(documentsStore.currentDocument.id)" target="_blank">
+            <v-list-item @click="triggerExport('word')">
               <template v-slot:prepend><v-icon color="blue">mdi-file-word</v-icon></template>
               <v-list-item-title>Word</v-list-item-title>
             </v-list-item>
-            <v-list-item :href="exportUrls.xlsx(documentsStore.currentDocument.id)" target="_blank">
+            <v-list-item @click="triggerExport('xlsx')">
               <template v-slot:prepend><v-icon color="success">mdi-file-excel</v-icon></template>
               <v-list-item-title>Excel (XLSX)</v-list-item-title>
             </v-list-item>
-            <v-list-item :href="exportUrls.json(documentsStore.currentDocument.id)" target="_blank">
+            <v-list-item @click="triggerExport('json')">
               <template v-slot:prepend><v-icon color="orange">mdi-code-json</v-icon></template>
               <v-list-item-title>JSON</v-list-item-title>
             </v-list-item>
-            <v-list-item :href="exportUrls.txt(documentsStore.currentDocument.id)" target="_blank">
+            <v-list-item @click="triggerExport('txt')">
               <template v-slot:prepend><v-icon color="green">mdi-chart-line</v-icon></template>
               <v-list-item-title>TXT</v-list-item-title>
             </v-list-item>
@@ -308,7 +308,8 @@ import PDFViewer from '../components/PDFViewer.vue'
 import MetricsPanel from '../components/MetricsPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDictionariesStore } from '@/stores/dictionaries'
-import { usersApi, exportUrls } from '@/services/api'
+import { useNotificationsStore } from '@/stores/notifications'
+import { usersApi, downloadExport } from '@/services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -316,6 +317,21 @@ const documentsStore = useDocumentsStore()
 const requirementsStore = useRequirementsStore()
 const auth = useAuthStore()
 const dicts = useDictionariesStore()
+const notifications = useNotificationsStore()
+
+const exportLoading = ref(false)
+
+async function triggerExport(format) {
+  if (!documentsStore.currentDocument) return
+  exportLoading.value = true
+  try {
+    await downloadExport(documentsStore.currentDocument.id, format)
+  } catch (e) {
+    console.error('Export failed', e)
+  } finally {
+    exportLoading.value = false
+  }
+}
 
 const pdfViewer = ref(null)
 const requirementsScrollContainer = ref(null)
@@ -412,11 +428,18 @@ const createRequirement = async () => {
       discipline: newRequirement.value.discipline?.trim() || undefined,
       page_number: newRequirement.value.page_number || undefined,
     }
-    await requirementsStore.createRequirement(documentId, data)
+    const newReq = await requirementsStore.createRequirement(documentId, data)
     showAddRequirementDialog.value = false
     newRequirement.value = { text: '', requirement_id: '', type: null, priority: null, discipline: '', page_number: null }
+    // Scroll to the newly created requirement after DOM update
+    if (newReq?.id) {
+      await nextTick()
+      const el = document.getElementById(`req-${newReq.id}`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    notifications.notifySuccess(`Требование создано`)
   } catch (e) {
-    // Store handles error; could show notification
+    notifications.notifyError('Не удалось создать требование')
   } finally {
     creatingRequirement.value = false
   }

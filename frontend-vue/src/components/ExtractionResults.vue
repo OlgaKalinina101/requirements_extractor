@@ -83,94 +83,66 @@
 
       <v-list density="compact">
         <v-list-item
-          :href="wordUrl"
-          target="_blank"
           class="download-item"
+          @click="triggerExport('word')"
+          :disabled="exportingFormat === 'word'"
         >
           <template v-slot:prepend>
             <v-icon color="blue">mdi-file-word</v-icon>
           </template>
-
           <v-list-item-title>Word документ</v-list-item-title>
           <v-list-item-subtitle>Реестр требований + метрики покрытия</v-list-item-subtitle>
-
           <template v-slot:append>
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-            >
-              <v-icon>mdi-download</v-icon>
-            </v-btn>
+            <v-progress-circular v-if="exportingFormat === 'word'" indeterminate size="20" width="2" />
+            <v-icon v-else>mdi-download</v-icon>
           </template>
         </v-list-item>
 
         <v-list-item
-          :href="jsonUrl"
-          target="_blank"
           class="download-item"
-        >
-          <template v-slot:prepend>
-            <v-icon color="orange">mdi-code-json</v-icon>
-          </template>
-
-          <v-list-item-title>JSON реестр</v-list-item-title>
-          <v-list-item-subtitle>Структурированный реестр требований</v-list-item-subtitle>
-
-          <template v-slot:append>
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-            >
-              <v-icon>mdi-download</v-icon>
-            </v-btn>
-          </template>
-        </v-list-item>
-
-        <v-list-item
-          :href="txtUrl"
-          target="_blank"
-          class="download-item"
-        >
-          <template v-slot:prepend>
-            <v-icon color="green">mdi-chart-line</v-icon>
-          </template>
-
-          <v-list-item-title>Отчёт TXT</v-list-item-title>
-          <v-list-item-subtitle>Статистика обработки документа</v-list-item-subtitle>
-
-          <template v-slot:append>
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-            >
-              <v-icon>mdi-download</v-icon>
-            </v-btn>
-          </template>
-        </v-list-item>
-
-        <v-list-item
-          :href="xlsxUrl"
-          target="_blank"
-          class="download-item"
+          @click="triggerExport('xlsx')"
+          :disabled="exportingFormat === 'xlsx'"
         >
           <template v-slot:prepend>
             <v-icon color="success">mdi-file-excel</v-icon>
           </template>
-
           <v-list-item-title>Excel (XLSX)</v-list-item-title>
           <v-list-item-subtitle>Реестр требований с полной структурой</v-list-item-subtitle>
-
           <template v-slot:append>
-            <v-btn
-              icon
-              variant="text"
-              size="small"
-            >
-              <v-icon>mdi-download</v-icon>
-            </v-btn>
+            <v-progress-circular v-if="exportingFormat === 'xlsx'" indeterminate size="20" width="2" />
+            <v-icon v-else>mdi-download</v-icon>
+          </template>
+        </v-list-item>
+
+        <v-list-item
+          class="download-item"
+          @click="triggerExport('json')"
+          :disabled="exportingFormat === 'json'"
+        >
+          <template v-slot:prepend>
+            <v-icon color="orange">mdi-code-json</v-icon>
+          </template>
+          <v-list-item-title>JSON реестр</v-list-item-title>
+          <v-list-item-subtitle>Структурированный реестр требований</v-list-item-subtitle>
+          <template v-slot:append>
+            <v-progress-circular v-if="exportingFormat === 'json'" indeterminate size="20" width="2" />
+            <v-icon v-else>mdi-download</v-icon>
+          </template>
+        </v-list-item>
+
+        <v-list-item
+          class="download-item"
+          @click="triggerExport('txt')"
+          :disabled="exportingFormat === 'txt'"
+        >
+          <template v-slot:prepend>
+            <v-icon color="green">mdi-chart-line</v-icon>
+          </template>
+          <v-list-item-title>Отчёт TXT</v-list-item-title>
+          <v-list-item-subtitle>Полный реестр в текстовом формате</v-list-item-subtitle>
+          <template v-slot:append>
+            <v-progress-circular v-if="exportingFormat === 'txt'" indeterminate size="20" width="2" />
+            <v-icon v-else>mdi-download</v-icon>
           </template>
         </v-list-item>
       </v-list>
@@ -210,8 +182,8 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { exportUrls } from '@/services/api'
+import { ref, computed } from 'vue'
+import { downloadExport } from '@/services/api'
 
 const props = defineProps({
   results: {
@@ -237,10 +209,19 @@ const displayModelName = computed(() => {
   return modelDisplayNames[props.results.model_used] || props.results.model_used
 })
 
-const wordUrl = computed(() => props.results?.document_id ? exportUrls.word(props.results.document_id) : null)
-const jsonUrl = computed(() => props.results?.document_id ? exportUrls.json(props.results.document_id) : null)
-const txtUrl = computed(() => props.results?.document_id ? exportUrls.txt(props.results.document_id) : null)
-const xlsxUrl = computed(() => props.results?.document_id ? exportUrls.xlsx(props.results.document_id) : null)
+const exportingFormat = ref(null)
+
+async function triggerExport(format) {
+  if (!props.results?.document_id || exportingFormat.value) return
+  exportingFormat.value = format
+  try {
+    await downloadExport(props.results.document_id, format)
+  } catch (e) {
+    console.error('Export failed', e)
+  } finally {
+    exportingFormat.value = null
+  }
+}
 </script>
 
 <style scoped>

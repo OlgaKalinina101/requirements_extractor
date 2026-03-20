@@ -167,13 +167,14 @@ import { useNotificationsStore } from '@/stores/notifications'
 const notifications = useNotificationsStore()
 
 const dictionaries = ref([
-  { id: 'requirement_types', title: 'Типы требований',           icon: 'mdi-shape',         color: 'blue',   count: 0 },
-  { id: 'priorities',        title: 'Приоритеты',                icon: 'mdi-flag',          color: 'orange', count: 0 },
-  { id: 'statuses',          title: 'Статусы жизненного цикла',  icon: 'mdi-traffic-light', color: 'green',  count: 0 },
-  { id: 'disciplines',       title: 'Дисциплины',                icon: 'mdi-domain',        color: 'cyan',   count: 0 },
-  { id: 'verification_methods', title: 'Методы подтверждения',  icon: 'mdi-check-decagram', color: 'teal',   count: 0 },
-  { id: 'link_types',       title: 'Типы связей',               icon: 'mdi-link-variant',   color: 'purple', count: 0 },
-  { id: 'document_types',    title: 'Типы документов',          icon: 'mdi-file-document',  color: 'brown',  count: 0 },
+  { id: 'requirement_types',  title: 'Типы требований',           icon: 'mdi-shape',              color: 'blue',   count: 0 },
+  { id: 'priorities',         title: 'Приоритеты',                icon: 'mdi-flag',               color: 'orange', count: 0 },
+  { id: 'statuses',           title: 'Статусы проверки',          icon: 'mdi-traffic-light',      color: 'green',  count: 0 },
+  { id: 'lifecycle_statuses', title: 'Статусы жизненного цикла',  icon: 'mdi-timeline-check',     color: 'teal',   count: 0 },
+  { id: 'disciplines',        title: 'Дисциплины',                icon: 'mdi-domain',             color: 'cyan',   count: 0 },
+  { id: 'verification_methods', title: 'Методы подтверждения',   icon: 'mdi-check-decagram',     color: 'teal',   count: 0 },
+  { id: 'link_types',         title: 'Типы связей',               icon: 'mdi-link-variant',       color: 'purple', count: 0 },
+  { id: 'document_types',     title: 'Типы документов',           icon: 'mdi-file-document',      color: 'brown',  count: 0 },
 ])
 
 const colorOptions = [

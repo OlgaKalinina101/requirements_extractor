@@ -132,6 +132,8 @@ export const authApi = {
 // Prompts API (admin)
 export const promptsApi = {
   getAll: () => api.get('/api/prompts'),
+  update: (key, data) => api.put(`/api/prompts/${key}`, data),
+  reset: (key) => api.post(`/api/prompts/${key}/reset`),
 }
 
 // Users API (admin)
@@ -142,13 +144,42 @@ export const usersApi = {
   deactivate: (id) => api.delete(`/api/users/${id}`),
 }
 
-// Export URLs (use as href for download links)
+// Export URL builders
 export const exportUrls = {
-  word: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/word`,
-  json: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/json`,
-  txt: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/txt`,
-  xlsx: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/export/xlsx`,
-  pdf: (documentId) => `${API_BASE_URL}/api/documents/${documentId}/pdf`,
+  word: (documentId) => `/api/documents/${documentId}/export/word`,
+  json: (documentId) => `/api/documents/${documentId}/export/json`,
+  txt:  (documentId) => `/api/documents/${documentId}/export/txt`,
+  xlsx: (documentId) => `/api/documents/${documentId}/export/xlsx`,
+  pdf:  (documentId) => `/api/documents/${documentId}/pdf`,
+}
+
+// Download export file via axios (carries Authorization header, avoids 401)
+export async function downloadExport(documentId, format) {
+  const url = exportUrls[format]?.(documentId)
+  if (!url) throw new Error(`Unknown export format: ${format}`)
+
+  const mimeTypes = {
+    word: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    json: 'application/json',
+    txt:  'text/plain',
+  }
+  const extensions = { word: 'docx', xlsx: 'xlsx', json: 'json', txt: 'txt' }
+
+  const response = await api.get(url, { responseType: 'blob' })
+
+  const contentDisposition = response.headers['content-disposition'] || ''
+  let filename = contentDisposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)/i)?.[1]
+    || `requirements_${documentId}.${extensions[format] || format}`
+
+  const blob = new Blob([response.data], { type: mimeTypes[format] || 'application/octet-stream' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = decodeURIComponent(filename)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(link.href)
 }
 
 // WebSocket connection for real-time updates

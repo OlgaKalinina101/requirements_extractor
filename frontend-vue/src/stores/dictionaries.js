@@ -10,9 +10,11 @@ export const useDictionariesStore = defineStore('dictionaries', () => {
   const types               = ref([])  // requirement_types
   const priorities          = ref([])  // priorities
   const statuses            = ref([])  // statuses
+  const lifecycleStatuses   = ref([])  // lifecycle_statuses
   const disciplines         = ref([])  // disciplines
   const verificationMethods = ref([])  // verification_methods
-  const linkTypes            = ref([])  // link_types
+  const linkTypes           = ref([])  // link_types
+  const documentTypes       = ref([])  // document_types
   const loaded               = ref(false)
   const loading              = ref(false)
 
@@ -20,20 +22,24 @@ export const useDictionariesStore = defineStore('dictionaries', () => {
     if (loaded.value || loading.value) return
     loading.value = true
     try {
-      const [t, p, s, d, v, l] = await Promise.all([
+      const [t, p, s, ls, d, v, l, dt] = await Promise.all([
         api.get('/api/dictionaries/requirement_types'),
         api.get('/api/dictionaries/priorities'),
         api.get('/api/dictionaries/statuses'),
+        api.get('/api/dictionaries/lifecycle_statuses'),
         api.get('/api/dictionaries/disciplines'),
         api.get('/api/dictionaries/verification_methods'),
         api.get('/api/dictionaries/link_types'),
+        api.get('/api/dictionaries/document_types'),
       ])
       types.value               = t.data.filter(i => i.is_active)
       priorities.value          = p.data.filter(i => i.is_active)
       statuses.value            = s.data.filter(i => i.is_active)
+      lifecycleStatuses.value   = ls.data.filter(i => i.is_active)
       disciplines.value         = d.data.filter(i => i.is_active)
       verificationMethods.value = v.data.filter(i => i.is_active)
       linkTypes.value           = l.data.filter(i => i.is_active)
+      documentTypes.value       = dt.data.filter(i => i.is_active)
       loaded.value = true
     } catch (e) {
       console.error('Failed to load dictionaries', e)
@@ -46,9 +52,11 @@ export const useDictionariesStore = defineStore('dictionaries', () => {
     types.value = []
     priorities.value = []
     statuses.value = []
+    lifecycleStatuses.value = []
     disciplines.value = []
     verificationMethods.value = []
     linkTypes.value = []
+    documentTypes.value = []
     loaded.value = false
   }
 
@@ -135,6 +143,37 @@ export const useDictionariesStore = defineStore('dictionaries', () => {
     return item ? item.name : code
   }
 
+  /** Display name for lifecycle status code */
+  function lifecycleStatusName(code) {
+    if (!code) return ''
+    const item = lifecycleStatuses.value.find(i => i.code === code)
+    return item ? item.name : code
+  }
+
+  /** Vuetify color for lifecycle status code */
+  function lifecycleStatusColor(code) {
+    if (!code) return 'grey'
+    const item = lifecycleStatuses.value.find(i => i.code === code)
+    return item?.color || 'grey'
+  }
+
+  /** Display name for document type code */
+  function documentTypeName(code) {
+    if (!code) return ''
+    const item = documentTypes.value.find(i => i.code === code)
+    return item ? item.name : code
+  }
+
+  /** [{ title, value }] for v-select — lifecycle statuses */
+  const lifecycleStatusOptions = computed(() =>
+    lifecycleStatuses.value.map(i => ({ title: i.name, value: i.code }))
+  )
+
+  /** [{ title, value }] for v-select — document types */
+  const documentTypeOptions = computed(() =>
+    documentTypes.value.map(i => ({ title: i.name, value: i.code }))
+  )
+
   /** Only execution statuses (in_progress, done, blocked) with icon */
   const executionStatusOptions = computed(() =>
     statuses.value
@@ -148,12 +187,16 @@ export const useDictionariesStore = defineStore('dictionaries', () => {
   )
 
   return {
-    types, priorities, statuses, disciplines, verificationMethods, linkTypes, loaded, loading,
+    types, priorities, statuses, lifecycleStatuses, disciplines, verificationMethods, linkTypes, documentTypes,
+    loaded, loading,
     loadAll, reset,
     typeName, typeColor,
     priorityName, priorityColor,
     statusName, statusColor,
     linkTypeName,
-    typeOptions, priorityOptions, statusOptions, disciplineOptions, verificationMethodOptions, linkTypeOptions, executionStatusOptions,
+    lifecycleStatusName, lifecycleStatusColor,
+    documentTypeName,
+    typeOptions, priorityOptions, statusOptions, lifecycleStatusOptions, disciplineOptions,
+    verificationMethodOptions, linkTypeOptions, documentTypeOptions, executionStatusOptions,
   }
 })

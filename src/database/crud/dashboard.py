@@ -8,7 +8,16 @@ from sqlalchemy import func, desc
 from src.database.models import Project, Document, Requirement, User, Comment
 
 
-def _apply_req_filters(q, project_id: Optional[int] = None, assignee_id: Optional[int] = None, discipline: Optional[str] = None):
+def _apply_req_filters(
+    q,
+    project_id: Optional[int] = None,
+    assignee_id: Optional[int] = None,
+    discipline: Optional[str] = None,
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    type: Optional[str] = None,
+    search: Optional[str] = None,
+):
     """Apply optional filters to a Requirement query."""
     if project_id is not None:
         q = q.join(Document, Requirement.document_id == Document.id).filter(Document.project_id == project_id)
@@ -16,6 +25,14 @@ def _apply_req_filters(q, project_id: Optional[int] = None, assignee_id: Optiona
         q = q.filter(Requirement.assignee_id == assignee_id)
     if discipline is not None:
         q = q.filter(Requirement.discipline == discipline)
+    if status is not None:
+        q = q.filter(Requirement.status == status)
+    if priority is not None:
+        q = q.filter(Requirement.priority == priority)
+    if type is not None:
+        q = q.filter(Requirement.type == type)
+    if search:
+        q = q.filter(Requirement.text.ilike(f"%{search}%"))
     return q
 
 
@@ -24,20 +41,32 @@ def get_dashboard_stats(
     project_id: Optional[int] = None,
     assignee_id: Optional[int] = None,
     discipline: Optional[str] = None,
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    type: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Get aggregated dashboard statistics for manager view.
 
-    Optional filters: project_id, assignee_id, discipline.
+    Optional filters: project_id, assignee_id, discipline, status, priority, type, search.
     Returns:
         - total_requirements, total_documents, total_projects
         - by_status: [{status, count}, ...]
         - by_priority: [{priority, count}, ...]
         - by_type: [{type, count}, ...]
         - assignee_workload: [{assignee_id, assignee_name, total, done, in_progress, pending}, ...]
-        - recent_activity: [{type, timestamp, ...}, ...]
     """
     def base():
-        return _apply_req_filters(db.query(Requirement), project_id, assignee_id, discipline)
+        return _apply_req_filters(
+            db.query(Requirement),
+            project_id=project_id,
+            assignee_id=assignee_id,
+            discipline=discipline,
+            status=status,
+            priority=priority,
+            type=type,
+            search=search,
+        )
 
     # Totals: from filtered requirements
     q_totals = base()

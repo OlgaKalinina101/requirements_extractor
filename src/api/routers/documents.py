@@ -46,7 +46,7 @@ async def get_all_documents(
 
 
 @router.get("/{document_id}")
-async def get_document(document_id: int, db=Depends(get_db)):
+async def get_document(document_id: int, db=Depends(get_db), _current=Depends(get_current_user)):
     """Get document by ID with full metadata."""
     try:
         document = crud.get_document(db, document_id)
@@ -82,6 +82,26 @@ async def create_requirement(
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Requirement ID '{req_id}' already exists in this document")
+
+    # Inherit section_id from existing requirements on the same page so the new
+    # requirement is sorted together with its page-mates rather than falling to
+    # the very end of the list (section_id IS NULL → nulls_last in ORDER BY).
+    section_id: int | None = None
+    if request.page_number:
+        from src.database.models import Requirement as _Req
+        peer = (
+            db.query(_Req)
+            .filter(
+                _Req.document_id == document_id,
+                _Req.page_number == request.page_number,
+                _Req.section_id.isnot(None),
+            )
+            .order_by(_Req.section_id.asc())
+            .first()
+        )
+        if peer:
+            section_id = peer.section_id
+
     req = crud.create_requirement(
         db=db,
         document_id=document_id,
@@ -91,6 +111,7 @@ async def create_requirement(
         type=request.type,
         priority=request.priority,
         page_number=request.page_number,
+        section_id=section_id,
     )
     if request.discipline:
         req.discipline = request.discipline
@@ -155,7 +176,7 @@ async def get_requirements(
 
 
 @router.get("/{document_id}/metrics")
-async def get_metrics(document_id: int, db=Depends(get_db)):
+async def get_metrics(document_id: int, db=Depends(get_db), _current=Depends(get_current_user)):
     """Get coverage metrics for a document."""
     try:
         document = crud.get_document(db, document_id)
@@ -173,7 +194,7 @@ async def get_metrics(document_id: int, db=Depends(get_db)):
 
 
 @router.api_route("/{document_id}/pdf", methods=["GET", "HEAD"])
-async def get_document_pdf(document_id: int, request: Request, db=Depends(get_db)):
+async def get_document_pdf(document_id: int, request: Request, db=Depends(get_db), _current=Depends(get_current_user)):
     """Get PDF file for document viewer. HEAD supported for content-type check."""
     try:
         document = crud.get_document(db, document_id)
@@ -201,6 +222,7 @@ async def export_word(
     document_id: int,
     background_tasks: BackgroundTasks,
     db=Depends(get_db),
+    _current=Depends(get_current_user),
 ):
     """Generate Word document from database data on-the-fly."""
     from src.word_exporter import generate_word_from_db
@@ -234,6 +256,7 @@ async def export_json(
     document_id: int,
     background_tasks: BackgroundTasks,
     db=Depends(get_db),
+    _current=Depends(get_current_user),
 ):
     """Generate JSON registry from database data on-the-fly."""
     from src.export import export_json_to_temp_file
@@ -262,6 +285,7 @@ async def export_xlsx(
     document_id: int,
     background_tasks: BackgroundTasks,
     db=Depends(get_db),
+    _current=Depends(get_current_user),
 ):
     """Generate Excel (XLSX) registry from database data on-the-fly."""
     from src.export.xlsx_exporter import export_xlsx_to_temp_file
@@ -295,6 +319,7 @@ async def export_txt(
     document_id: int,
     background_tasks: BackgroundTasks,
     db=Depends(get_db),
+    _current=Depends(get_current_user),
 ):
     """Generate TXT usage report from database data on-the-fly."""
     from src.export import export_txt_to_temp_file

@@ -10,6 +10,7 @@ from src.api.schemas import (
     RejectRequirementRequest,
     AssignRequest,
     SetStatusRequest,
+    SetLifecycleStatusRequest,
     CommentRequest,
     CreateLinkRequest,
 )
@@ -169,6 +170,7 @@ async def edit_requirement_endpoint(
             verification_method=request.verification_method,
             deadline=request.deadline,
             parent_id=request.parent_id,
+            lifecycle_status=request.lifecycle_status,
         )
         crud.create_history_entry(
             db, requirement_id, "edited",
@@ -259,6 +261,33 @@ async def set_requirement_status(
         field_name="status", new_value=request.status,
     )
     return {"requirement_id": requirement_id, "status": req.status}
+
+
+VALID_LIFECYCLE_STATUSES = {"draft", "in_review", "approved", "implemented", "verified", "rejected"}
+
+
+@router.post("/{requirement_id}/set-lifecycle-status")
+async def set_requirement_lifecycle_status(
+    requirement_id: int,
+    request: SetLifecycleStatusRequest,
+    db=Depends(get_db),
+    current_user=Depends(require_manager),
+):
+    """Update requirement lifecycle status. Manager/admin only."""
+    if request.lifecycle_status not in VALID_LIFECYCLE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid lifecycle status. Allowed: {sorted(VALID_LIFECYCLE_STATUSES)}",
+        )
+    req = crud.update_lifecycle_status(db, requirement_id, request.lifecycle_status)
+    if not req:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    crud.create_history_entry(
+        db, requirement_id, "lifecycle_status_changed",
+        user_id=current_user.id,
+        field_name="lifecycle_status", new_value=request.lifecycle_status,
+    )
+    return {"requirement_id": requirement_id, "lifecycle_status": req.lifecycle_status}
 
 
 @router.get("/{requirement_id}/history")

@@ -10,6 +10,51 @@ from .utils import group_requirements_by_sections
 logger = logging.getLogger("api")
 
 
+def _append_requirement(lines: list, req) -> None:
+    """Append formatted requirement block to lines list."""
+    display_text = req.human_edited or req.text or ""
+    lc = getattr(req, "lifecycle_status", None) or "—"
+    lines.append(
+        f"[{req.requirement_id}] стр.{req.page_number or '?'}"
+        f"  [{req.type or '—'}]  [{req.priority or '—'}]"
+        f"  [статус: {req.status}]  [ЖЦ: {lc}]"
+    )
+    lines.append(f"  {display_text}")
+    if req.subitems:
+        for item in req.subitems:
+            lines.append(f"    • {item}")
+    # Optional metadata line
+    meta_parts = []
+    discipline = getattr(req, "discipline", None)
+    vm = getattr(req, "verification_method", None)
+    deadline = req.deadline.isoformat() if getattr(req, "deadline", None) else None
+    assignee = None
+    if hasattr(req, "assignee") and req.assignee:
+        assignee = req.assignee.full_name or req.assignee.email
+    if discipline:
+        meta_parts.append(f"дисциплина: {discipline}")
+    if vm:
+        meta_parts.append(f"метод: {vm}")
+    if deadline:
+        meta_parts.append(f"срок: {deadline}")
+    if assignee:
+        meta_parts.append(f"исполнитель: {assignee}")
+    if meta_parts:
+        lines.append(f"  → {' | '.join(meta_parts)}")
+    # Links
+    outgoing = getattr(req, "outgoing_links", None) or []
+    incoming = getattr(req, "incoming_links", None) or []
+    for link in outgoing:
+        target = getattr(link, "target_requirement", None)
+        if target:
+            lines.append(f"  ↗ {link.link_type}: {target.requirement_id}")
+    for link in incoming:
+        source = getattr(link, "source_requirement", None)
+        if source:
+            lines.append(f"  ↙ {link.link_type}: {source.requirement_id}")
+    lines.append("")
+
+
 def build_txt_report(
     document,
     sections: List,
@@ -64,29 +109,13 @@ def build_txt_report(
         lines.append("")
 
         for req in section_requirements:
-            display_text = req.human_edited or req.text or ""
-            lines.append(
-                f"[{req.requirement_id}] стр.{req.page_number or '?'}  [{req.type or '—'}]  [{req.priority or '—'}]  [{req.status}]"
-            )
-            lines.append(f"  {display_text}")
-            if req.subitems:
-                for item in req.subitems:
-                    lines.append(f"    • {item}")
-            lines.append("")
+            _append_requirement(lines, req)
 
     # Orphan requirements (section_id is NULL)
     if orphans:
         lines.extend(["─" * 60, f"Требования без раздела  ({len(orphans)} шт.)", "─" * 60, ""])
         for req in orphans:
-            display_text = req.human_edited or req.text or ""
-            lines.append(
-                f"[{req.requirement_id}] стр.{req.page_number or '?'}  [{req.type or '—'}]  [{req.priority or '—'}]  [{req.status}]"
-            )
-            lines.append(f"  {display_text}")
-            if req.subitems:
-                for item in req.subitems:
-                    lines.append(f"    • {item}")
-            lines.append("")
+            _append_requirement(lines, req)
 
     lines.append("=" * 80)
     return "\n".join(lines)

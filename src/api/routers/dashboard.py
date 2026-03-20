@@ -16,12 +16,25 @@ async def get_dashboard(
     project_id: Optional[int] = None,
     assignee_id: Optional[int] = None,
     discipline: Optional[str] = None,
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    type: Optional[str] = None,
+    search: Optional[str] = None,
     db=Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """Get dashboard statistics. Manager/admin: full analytics. Executor: my assigned requirements."""
     if current_user.role in ("admin", "manager", "department_head"):
-        return crud.get_dashboard_stats(db, project_id=project_id, assignee_id=assignee_id, discipline=discipline)
+        return crud.get_dashboard_stats(
+            db,
+            project_id=project_id,
+            assignee_id=assignee_id,
+            discipline=discipline,
+            status=status,
+            priority=priority,
+            type=type,
+            search=search,
+        )
     return crud.get_my_dashboard_stats(db, current_user.id)
 
 
@@ -30,11 +43,24 @@ async def get_manager_dashboard(
     project_id: Optional[int] = None,
     assignee_id: Optional[int] = None,
     discipline: Optional[str] = None,
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    type: Optional[str] = None,
+    search: Optional[str] = None,
     db=Depends(get_db),
     _current=Depends(require_manager),
 ):
     """Get full dashboard statistics (manager/admin only)."""
-    return crud.get_dashboard_stats(db, project_id=project_id, assignee_id=assignee_id, discipline=discipline)
+    return crud.get_dashboard_stats(
+        db,
+        project_id=project_id,
+        assignee_id=assignee_id,
+        discipline=discipline,
+        status=status,
+        priority=priority,
+        type=type,
+        search=search,
+    )
 
 
 @router.get("/activity")

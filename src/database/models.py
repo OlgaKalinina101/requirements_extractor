@@ -165,6 +165,7 @@ class Requirement(Base):
     discipline = Column(String(100), nullable=True, index=True)
     deadline = Column(Date, nullable=True)  # Due date for execution
     verification_method = Column(String(100), nullable=True)  # Analysis, Test, Inspection, Demonstration (from dictionary)
+    lifecycle_status = Column(String(100), nullable=True)  # Draft, In Review, Approved, Implemented, Verified, Rejected
 
     # Review fields
     status = Column(String(50), default="pending", nullable=False, index=True)
@@ -300,3 +301,24 @@ class RequirementHistory(Base):
     # Relationships
     requirement = relationship("Requirement", back_populates="history")
     user = relationship("User", back_populates="requirement_history")
+
+
+class Prompt(Base):
+    """AI prompt templates stored in DB. Editable by admin via UI.
+
+    instruction     — editable part (role, task rules)
+    response_format — read-only JSON schema / output format
+    user_template   — editable user message template with {variables}
+    """
+    __tablename__ = "prompts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), nullable=False, unique=True, index=True)
+    name = Column(String(200), nullable=True)
+    version = Column(String(50), nullable=True)
+    instruction = Column(Text, nullable=True)
+    response_format = Column(Text, nullable=True)
+    user_template = Column(Text, nullable=True)
+    temperature = Column(Float, nullable=True)
+    max_tokens = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=True)

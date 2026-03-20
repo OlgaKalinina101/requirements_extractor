@@ -7,6 +7,42 @@
       </v-card-title>
       
       <v-card-text>
+        <!-- Project selector — shown only when projectId is not passed as a prop -->
+        <v-autocomplete
+          v-if="!props.projectId"
+          v-model="selectedProjectId"
+          :items="projectOptions"
+          item-title="label"
+          item-value="id"
+          label="Проект *"
+          prepend-icon="mdi-folder-open"
+          :loading="projectsStore.loading"
+          :disabled="uploading"
+          placeholder="Выберите проект"
+          no-data-text="Нет доступных проектов"
+          clearable
+          class="mb-2"
+        >
+          <template #item="{ item, props: itemProps }">
+            <v-list-item v-bind="itemProps">
+              <template #prepend>
+                <v-icon color="primary" size="small">mdi-folder</v-icon>
+              </template>
+            </v-list-item>
+          </template>
+        </v-autocomplete>
+
+        <!-- Project badge when pre-selected via prop -->
+        <v-chip
+          v-else
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-folder"
+          class="mb-4"
+        >
+          {{ projectLabel }}
+        </v-chip>
+
         <v-file-input
           v-model="file"
           label="Выберите PDF файл"
@@ -24,7 +60,7 @@
           item-title="name"
           item-value="id"
           :disabled="uploading"
-          class="mt-4"
+          class="mt-2"
         ></v-select>
 
         <v-checkbox
@@ -37,7 +73,22 @@
 
       <v-card-actions>
         <v-spacer></v-spacer>
+        <v-tooltip
+          v-if="!effectiveProjectId"
+          text="Выберите проект перед загрузкой"
+          location="top"
+        >
+          <template #activator="{ props: tooltipProps }">
+            <span v-bind="tooltipProps">
+              <v-btn color="primary" disabled>
+                <v-icon left>mdi-upload</v-icon>
+                Загрузить и обработать
+              </v-btn>
+            </span>
+          </template>
+        </v-tooltip>
         <v-btn
+          v-else
           color="primary"
           :disabled="!file || uploading"
           :loading="uploading"
@@ -67,8 +118,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useDocumentsStore } from '../stores/documents'
+import { useProjectsStore } from '../stores/projects'
 import { useRouter } from 'vue-router'
 import ProcessingStatus from './ProcessingStatus.vue'
 import ExtractionResults from './ExtractionResults.vue'
@@ -80,7 +132,32 @@ const props = defineProps({
 const emit = defineEmits(['uploaded', 'results-shown', 'results-hidden'])
 
 const documentsStore = useDocumentsStore()
+const projectsStore = useProjectsStore()
 const router = useRouter()
+
+// Local project selection (used when no projectId prop is given)
+const selectedProjectId = ref(null)
+
+// The project ID actually used for upload: prop takes priority, otherwise local selection
+const effectiveProjectId = computed(() =>
+  props.projectId != null ? props.projectId : selectedProjectId.value
+)
+
+// Flat list for v-autocomplete
+const projectOptions = computed(() =>
+  projectsStore.projects.map(p => ({
+    id: p.id,
+    label: p.code ? `[${p.code}] ${p.name}` : p.name,
+  }))
+)
+
+// Display label for pre-selected project (via prop)
+const projectLabel = computed(() => {
+  if (!props.projectId) return ''
+  const p = projectsStore.projects.find(p => p.id === Number(props.projectId))
+  if (!p) return `Проект #${props.projectId}`
+  return p.code ? `[${p.code}] ${p.name}` : p.name
+})
 
 const file = ref(null)
 const uploading = ref(false)
@@ -140,7 +217,7 @@ const connectWebSocket = () => {
 }
 
 const handleUpload = async () => {
-  if (!file.value) return
+  if (!file.value || !effectiveProjectId.value) return
 
   uploading.value = true
   showResults.value = false
@@ -153,7 +230,7 @@ const handleUpload = async () => {
   connectWebSocket()
   
   try {
-    const result = await documentsStore.uploadDocument(file.value, selectedModel.value, generateWord.value, props.projectId)
+    const result = await documentsStore.uploadDocument(file.value, selectedModel.value, generateWord.value, effectiveProjectId.value)
     
     progress.value = 100
     statusMessage.value = 'Обработка завершена!'
@@ -198,4 +275,10 @@ const resetUpload = () => {
   file.value = null
   emit('results-hidden')
 }
+
+onMounted(() => {
+  if (projectsStore.projects.length === 0) {
+    projectsStore.fetchProjects()
+  }
+})
 </script>

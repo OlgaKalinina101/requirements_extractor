@@ -9,6 +9,7 @@ from .requirements import (
     RejectRequirementRequest,
     AssignRequest,
     SetStatusRequest,
+    SetLifecycleStatusRequest,
     CreateLinkRequest,
 )
 from .comments import CommentRequest
@@ -25,6 +26,7 @@ __all__ = [
     "RejectRequirementRequest",
     "AssignRequest",
     "SetStatusRequest",
+    "SetLifecycleStatusRequest",
     "CreateLinkRequest",
     "CommentRequest",
 ]

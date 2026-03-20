@@ -144,7 +144,9 @@ export const useRequirementsStore = defineStore('requirements', {
     async createRequirement(documentId, data) {
       try {
         const response = await documentsApi.createRequirement(documentId, data)
-        this.requirements.push(response.data)
+        // Refetch the full list so the new item has all related fields
+        // (section, document, assignee) and appears correctly in all filters
+        await this.fetchRequirements(documentId)
         return response.data
       } catch (error) {
         this.error = error.message

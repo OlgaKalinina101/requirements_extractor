@@ -124,27 +124,35 @@ def generate_word_from_db(document, sections: List, all_requirements: List, metr
     doc.add_paragraph("")
 
     def _add_requirements_table(doc, reqs):
-        table = doc.add_table(rows=1, cols=6)
+        table = doc.add_table(rows=1, cols=10)
         table.style = "Light Grid Accent 1"
-        hdr = table.rows[0].cells
-        hdr[0].text = "ID"
-        hdr[1].text = "Требование"
-        hdr[2].text = "Тип"
-        hdr[3].text = "Приоритет"
-        hdr[4].text = "Страница"
-        hdr[5].text = "Статус"
+        col_names = [
+            "ID", "Требование", "Тип", "Приоритет",
+            "Стр.", "Статус", "Статус ЖЦ",
+            "Дисциплина", "Метод подтв.", "Ответственный",
+        ]
+        for i, name in enumerate(col_names):
+            hdr = table.rows[0].cells[i]
+            hdr.text = name
+            hdr.paragraphs[0].runs[0].bold = True
         for req in reqs:
             row = table.add_row().cells
-            row[0].text = req.requirement_id or ""
-            # Build requirement text: human-edited (or AI text) + subitems
             display_text = req.human_edited or req.text or ""
             if req.subitems:
                 display_text += "\n" + "\n".join(f"• {item}" for item in req.subitems)
+            assignee_name = ""
+            if hasattr(req, "assignee") and req.assignee:
+                assignee_name = req.assignee.full_name or req.assignee.email or ""
+            row[0].text = req.requirement_id or ""
             row[1].text = display_text
             row[2].text = req.type or ""
             row[3].text = req.priority or ""
             row[4].text = str(req.page_number or "")
             row[5].text = req.status or "pending"
+            row[6].text = getattr(req, "lifecycle_status", None) or ""
+            row[7].text = getattr(req, "discipline", None) or ""
+            row[8].text = getattr(req, "verification_method", None) or ""
+            row[9].text = assignee_name
         doc.add_paragraph("")
 
     doc.add_heading("Требования по разделам", 1)

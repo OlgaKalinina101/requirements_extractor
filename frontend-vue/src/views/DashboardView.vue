@@ -1,123 +1,155 @@
 <template>
   <div>
-    <h1 class="text-h4 mb-4">
-      <v-icon left color="primary" class="mr-3">mdi-view-dashboard</v-icon>
-      Дашборд
-    </h1>
-
-    <!-- Filters -->
-    <div class="filter-panel mb-4">
-      <div class="filter-panel__label">
-        <v-icon size="16" class="mr-1">mdi-filter-variant</v-icon>
-        Фильтры
-      </div>
-      <div class="filter-panel__chips" v-if="filterProjectId || filterAssigneeId || filterDiscipline">
-        <v-chip
-          v-if="filterProjectId"
-          size="small"
-          closable
-          color="grey"
-          variant="tonal"
-          class="mr-1"
-          @click:close="filterProjectId = null; onFilterChange()"
+    <!-- ── Header: Title + Filter toggle ──────────────────────── -->
+    <div class="d-flex align-center mb-4">
+      <h1 class="text-h4">
+        <v-icon left color="primary" class="mr-3">mdi-view-dashboard</v-icon>
+        Дашборд
+      </h1>
+      <v-spacer />
+      <v-badge
+        :content="activeFilterCount"
+        :model-value="activeFilterCount > 0"
+        color="primary"
+        overlap
+        offset-x="4"
+        offset-y="4"
+      >
+        <v-btn
+          :variant="showFilters ? 'flat' : 'outlined'"
+          :color="showFilters ? 'primary' : 'grey-darken-1'"
+          @click="showFilters = !showFilters"
         >
-          {{ projectOptions.find(p => p.value === filterProjectId)?.title }}
-        </v-chip>
-        <v-chip
-          v-if="filterAssigneeId"
-          size="small"
-          closable
-          color="grey"
-          variant="tonal"
-          class="mr-1"
-          @click:close="filterAssigneeId = null; onFilterChange()"
-        >
-          {{ userOptions.find(u => u.value === filterAssigneeId)?.title }}
-        </v-chip>
-        <v-chip
-          v-if="filterDiscipline"
-          size="small"
-          closable
-          color="grey"
-          variant="tonal"
-          @click:close="filterDiscipline = null; onFilterChange()"
-        >
-          {{ disciplineOptions.find(d => d.value === filterDiscipline)?.title }}
-        </v-chip>
-      </div>
-      <v-row align="center" dense class="filter-panel__selects">
-        <v-col cols="12" md="3">
-          <v-select
-            v-model="filterProjectId"
-            :items="projectOptions"
-            item-title="title"
-            item-value="value"
-            label="Проект"
-            density="compact"
-            hide-details
-            clearable
-            variant="outlined"
-            @update:model-value="onFilterChange"
-          >
-            <template #prepend-inner>
-              <v-icon size="16">mdi-folder-outline</v-icon>
-            </template>
-          </v-select>
-        </v-col>
-        <v-col cols="12" md="3">
-          <v-select
-            v-model="filterAssigneeId"
-            :items="userOptions"
-            item-title="title"
-            item-value="value"
-            label="Ответственный"
-            density="compact"
-            hide-details
-            clearable
-            variant="outlined"
-            @update:model-value="onFilterChange"
-          >
-            <template #prepend-inner>
-              <v-icon size="16">mdi-account-outline</v-icon>
-            </template>
-          </v-select>
-        </v-col>
-        <v-col cols="12" md="3">
-          <v-select
-            v-model="filterDiscipline"
-            :items="disciplineOptions"
-            item-title="title"
-            item-value="value"
-            label="Дисциплина"
-            density="compact"
-            hide-details
-            clearable
-            variant="outlined"
-            @update:model-value="onFilterChange"
-          >
-            <template #prepend-inner>
-              <v-icon size="16">mdi-tag-outline</v-icon>
-            </template>
-          </v-select>
-        </v-col>
-        <v-col cols="12" md="3" class="d-flex align-center justify-end">
-          <v-btn
-            variant="outlined"
-            color="grey-darken-1"
-            class="filter-reset-btn"
-            :disabled="!filterProjectId && !filterAssigneeId && !filterDiscipline"
-            @click="resetFilters"
-          >
-            <v-icon start size="16">mdi-refresh</v-icon>
-            Сбросить
-          </v-btn>
-        </v-col>
-      </v-row>
+          <v-icon start>mdi-filter-variant</v-icon>
+          Фильтры
+        </v-btn>
+      </v-badge>
     </div>
+
+    <!-- ── Collapsible filters panel ──────────────────────────── -->
+    <v-expand-transition>
+      <div v-show="showFilters">
+        <div class="filter-panel mb-4">
+          <v-row align="center" dense>
+            <v-col cols="12" md="3">
+              <v-select
+                v-model="filterProjectId"
+                :items="projectOptions"
+                item-title="title"
+                item-value="value"
+                label="Проект"
+                density="compact"
+                hide-details
+                clearable
+                variant="outlined"
+                @update:model-value="onFilterChange"
+              >
+                <template #prepend-inner>
+                  <v-icon size="16">mdi-folder-outline</v-icon>
+                </template>
+              </v-select>
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-select
+                v-model="filterAssigneeId"
+                :items="userOptions"
+                item-title="title"
+                item-value="value"
+                label="Ответственный"
+                density="compact"
+                hide-details
+                clearable
+                variant="outlined"
+                @update:model-value="onFilterChange"
+              >
+                <template #prepend-inner>
+                  <v-icon size="16">mdi-account-outline</v-icon>
+                </template>
+              </v-select>
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-select
+                v-model="filterDiscipline"
+                :items="disciplineOptions"
+                item-title="title"
+                item-value="value"
+                label="Дисциплина"
+                density="compact"
+                hide-details
+                clearable
+                variant="outlined"
+                @update:model-value="onFilterChange"
+              >
+                <template #prepend-inner>
+                  <v-icon size="16">mdi-tag-outline</v-icon>
+                </template>
+              </v-select>
+            </v-col>
+            <v-col cols="12" md="3" />
+          </v-row>
+          <v-row align="center" dense class="mt-2">
+            <v-col cols="12" md="3">
+              <v-select
+                v-model="filterStatus"
+                :items="statusOptions"
+                item-title="title"
+                item-value="value"
+                label="Статус"
+                density="compact"
+                hide-details
+                clearable
+                variant="outlined"
+                @update:model-value="onFilterChange"
+              />
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-select
+                v-model="filterPriority"
+                :items="priorityOptions"
+                item-title="title"
+                item-value="value"
+                label="Приоритет"
+                density="compact"
+                hide-details
+                clearable
+                variant="outlined"
+                @update:model-value="onFilterChange"
+              />
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-select
+                v-model="filterType"
+                :items="typeOptions"
+                item-title="title"
+                item-value="value"
+                label="Тип"
+                density="compact"
+                hide-details
+                clearable
+                variant="outlined"
+                @update:model-value="onFilterChange"
+              />
+            </v-col>
+            <v-col cols="12" md="3" class="d-flex align-center justify-end">
+              <v-btn
+                variant="outlined"
+                color="grey-darken-1"
+                class="filter-reset-btn"
+                :disabled="activeFilterCount === 0"
+                @click="resetFilters"
+              >
+                <v-icon start size="16">mdi-refresh</v-icon>
+                Сбросить
+              </v-btn>
+            </v-col>
+          </v-row>
+        </div>
+      </div>
+    </v-expand-transition>
 
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
 
-    <!-- Summary Cards -->
+    <!-- ── Summary Cards ──────────────────────────────────────── -->
     <v-row class="mb-4">
       <v-col cols="12" sm="6" md="4">
         <v-card color="blue" dark>
@@ -127,7 +159,6 @@
           </v-card-text>
         </v-card>
       </v-col>
-
       <v-col cols="12" sm="6" md="4">
         <v-card color="green" dark>
           <v-card-text>
@@ -136,7 +167,6 @@
           </v-card-text>
         </v-card>
       </v-col>
-
       <v-col cols="12" sm="6" md="4">
         <v-card color="purple" dark>
           <v-card-text>
@@ -147,7 +177,7 @@
       </v-col>
     </v-row>
 
-    <!-- Distribution charts -->
+    <!-- ── Distribution Charts ────────────────────────────────── -->
     <v-row class="mb-4">
       <v-col cols="12" md="4">
         <v-card>
@@ -163,13 +193,12 @@
                   height="8"
                   rounded
                 />
-                <span class="text-caption text-medium-emphasis">{{ item.count }}</span>
+                <span class="text-caption text-medium-emphasis" style="min-width: 28px; text-align: right">{{ item.count }}</span>
               </div>
             </div>
           </v-card-text>
         </v-card>
       </v-col>
-
       <v-col cols="12" md="4">
         <v-card>
           <v-card-title>По приоритетам</v-card-title>
@@ -184,13 +213,12 @@
                   height="8"
                   rounded
                 />
-                <span class="text-caption text-medium-emphasis">{{ item.count }}</span>
+                <span class="text-caption text-medium-emphasis" style="min-width: 28px; text-align: right">{{ item.count }}</span>
               </div>
             </div>
           </v-card-text>
         </v-card>
       </v-col>
-
       <v-col cols="12" md="4">
         <v-card>
           <v-card-title>По типам</v-card-title>
@@ -205,7 +233,7 @@
                   height="8"
                   rounded
                 />
-                <span class="text-caption text-medium-emphasis">{{ item.count }}</span>
+                <span class="text-caption text-medium-emphasis" style="min-width: 28px; text-align: right">{{ item.count }}</span>
               </div>
             </div>
           </v-card-text>
@@ -213,15 +241,15 @@
       </v-col>
     </v-row>
 
-    <!-- Assignee workload -->
-    <v-row class="mb-4">
-      <v-col cols="12">
+    <!-- ── Workload + Projects ────────────────────────────────── -->
+    <v-row>
+      <v-col cols="12" md="7">
         <v-card class="workload-card">
           <v-card-title class="workload-card__title">
             <v-icon class="mr-2" color="primary">mdi-account-group</v-icon>
             Нагрузка по ответственным
           </v-card-title>
-          <v-card-text>
+          <v-card-text class="workload-card__body">
             <div v-if="stats.assignee_workload.length === 0" class="text-body-2 text-medium-emphasis pa-4 text-center">
               <v-icon size="36" color="grey-lighten-2" class="d-block mx-auto mb-2">mdi-account-off-outline</v-icon>
               Нет назначенных требований
@@ -245,32 +273,13 @@
                       {{ a.total > 0 ? Math.round((a.done / a.total) * 100) : 0 }}%
                     </div>
                   </div>
-
                   <div class="assignee-card__bar-wrap">
-                    <div
-                      class="assignee-card__bar-track"
-                    >
-                      <!-- done -->
-                      <div
-                        class="assignee-card__bar-seg assignee-card__bar-done"
-                        :style="{ width: barPct(a.done, a.total) + '%' }"
-                        :title="`Выполнено: ${a.done}`"
-                      />
-                      <!-- in_progress -->
-                      <div
-                        class="assignee-card__bar-seg assignee-card__bar-progress"
-                        :style="{ width: barPct(a.in_progress, a.total) + '%' }"
-                        :title="`В работе: ${a.in_progress}`"
-                      />
-                      <!-- pending -->
-                      <div
-                        class="assignee-card__bar-seg assignee-card__bar-pending"
-                        :style="{ width: barPct(a.pending, a.total) + '%' }"
-                        :title="`Ожидает: ${a.pending}`"
-                      />
+                    <div class="assignee-card__bar-track">
+                      <div class="assignee-card__bar-seg assignee-card__bar-done"    :style="{ width: barPct(a.done, a.total) + '%' }"       :title="`Выполнено: ${a.done}`" />
+                      <div class="assignee-card__bar-seg assignee-card__bar-progress" :style="{ width: barPct(a.in_progress, a.total) + '%' }" :title="`В работе: ${a.in_progress}`" />
+                      <div class="assignee-card__bar-seg assignee-card__bar-pending"  :style="{ width: barPct(a.pending, a.total) + '%' }"     :title="`Ожидает: ${a.pending}`" />
                     </div>
                   </div>
-
                   <div class="assignee-card__stats">
                     <div class="assignee-card__stat">
                       <span class="assignee-card__stat-dot done" />
@@ -294,15 +303,15 @@
           </v-card-text>
         </v-card>
       </v-col>
-    </v-row>
 
-    <!-- Projects -->
-    <v-row>
-      <v-col cols="12">
-        <v-card>
-          <v-card-title>Проекты</v-card-title>
-          <v-card-text>
-            <v-alert v-if="!loading && projects.length === 0" type="info" variant="tonal">
+      <v-col cols="12" md="5">
+        <v-card class="projects-card">
+          <v-card-title>
+            <v-icon class="mr-2" color="primary">mdi-folder-multiple</v-icon>
+            Проекты
+          </v-card-title>
+          <v-card-text class="projects-card__body pa-0">
+            <v-alert v-if="!loading && projects.length === 0" type="info" variant="tonal" class="ma-3">
               Проектов пока нет. <v-btn variant="text" to="/">Создать проект</v-btn>
             </v-alert>
             <v-table v-else density="compact">
@@ -344,9 +353,13 @@ const notifications = useNotificationsStore()
 const dictionaries = useDictionariesStore()
 const loading = ref(true)
 const projects = ref([])
+const showFilters = ref(false)
 const filterProjectId = ref(null)
 const filterAssigneeId = ref(null)
 const filterDiscipline = ref(null)
+const filterStatus = ref(null)
+const filterPriority = ref(null)
+const filterType = ref(null)
 const projectsForFilter = ref([])
 const usersForFilter = ref([])
 
@@ -365,6 +378,24 @@ const disciplineOptions = computed(() => [
   { title: 'Все', value: null },
   ...(dictionaries.disciplineOptions || []),
 ])
+const statusOptions = computed(() => [
+  { title: 'Все', value: null },
+  ...dictionaries.statuses.map(s => ({ title: s.name, value: s.code })),
+])
+const priorityOptions = computed(() => [
+  { title: 'Все', value: null },
+  ...dictionaries.priorities.map(p => ({ title: p.name, value: p.code })),
+])
+const typeOptions = computed(() => [
+  { title: 'Все', value: null },
+  ...dictionaries.types.map(t => ({ title: t.name, value: t.code })),
+])
+
+const activeFilterCount = computed(() =>
+  [filterProjectId, filterAssigneeId, filterDiscipline, filterStatus, filterPriority, filterType]
+    .filter(f => f.value != null)
+    .length
+)
 
 const stats = reactive({
   totalRequirements: 0,
@@ -393,39 +424,18 @@ const barPct = (val, total) => {
   return Math.min(100, Math.round((val / total) * 100))
 }
 
-const statusLabels = {
-  pending: 'Ожидает',
-  accepted: 'Принято',
-  rejected: 'Отклонено',
-  modified: 'Изменено',
-  in_progress: 'В работе',
-  done: 'Выполнено',
-  blocked: 'Заблокировано',
-  unknown: 'Неизвестно',
-}
-
-const statusLabel = (s) => statusLabels[s] || s || 'Неизвестно'
-
-const priorityLabels = {
-  Mandatory: 'Обязательное',
-  Recommended: 'Рекомендуемое',
-  Optional: 'Опциональное',
-  Critical: 'Критический',
-  High: 'Высокий',
-  Medium: 'Средний',
-  Low: 'Низкий',
-  unknown: 'Неизвестно',
-}
-
-const priorityLabel = (p) => priorityLabels[p] || p || 'Неизвестно'
-
-const typeLabel = (t) => t || 'Неизвестно'
+const statusLabel = (s) => dictionaries.statusName(s) || s || 'Неизвестно'
+const priorityLabel = (p) => dictionaries.priorityName(p) || p || 'Неизвестно'
+const typeLabel = (t) => dictionaries.typeName(t) || t || 'Неизвестно'
 
 function buildParams() {
   const params = {}
   if (filterProjectId.value != null && filterProjectId.value !== '') params.project_id = filterProjectId.value
   if (filterAssigneeId.value != null && filterAssigneeId.value !== '') params.assignee_id = filterAssigneeId.value
   if (filterDiscipline.value != null && filterDiscipline.value !== '') params.discipline = filterDiscipline.value
+  if (filterStatus.value) params.status = filterStatus.value
+  if (filterPriority.value) params.priority = filterPriority.value
+  if (filterType.value) params.type = filterType.value
   return params
 }
 
@@ -464,6 +474,9 @@ function resetFilters() {
   filterProjectId.value = null
   filterAssigneeId.value = null
   filterDiscipline.value = null
+  filterStatus.value = null
+  filterPriority.value = null
+  filterType.value = null
   fetchData()
 }
 
@@ -493,27 +506,6 @@ onMounted(async () => {
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-
-.filter-panel__label {
-  font-size: 14px;
-  font-weight: 600;
-  color: #334155;
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.filter-panel__chips {
-  margin-bottom: 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.filter-panel__selects {
-  position: relative;
 }
 
 .filter-reset-btn {
@@ -564,6 +556,26 @@ onMounted(async () => {
   padding-bottom: 4px;
 }
 
+.workload-card__body {
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.projects-card {
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+
+.projects-card__body {
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+/* ── Assignee Cards ────────────────────────────────────────── */
 .assignee-card {
   background: #fff;
   border: 1.5px solid #f0f0f0;
@@ -574,7 +586,7 @@ onMounted(async () => {
 }
 
 .assignee-card:hover {
-  box-shadow: 0 6px 24px rgba(0,0,0,0.10);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
   transform: translateY(-2px);
 }
 

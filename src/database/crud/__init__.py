@@ -40,7 +40,9 @@ from src.database.crud.requirements import (
     edit_requirement,
     assign_requirement,
     update_requirement_status,
+    update_lifecycle_status,
     bulk_create_requirements,
+    _next_manual_requirement_id,
 )
 from src.database.crud.metrics import (
     get_coverage_metrics,
@@ -74,6 +76,13 @@ from src.database.crud.requirement_links import (
     create_link,
     delete_link,
     get_link,
+)
+from src.database.crud.prompts import (
+    get_all_prompts,
+    get_prompt_by_key,
+    update_prompt,
+    reset_prompt_to_yaml,
+    seed_prompts_from_yaml,
 )
 
 __all__ = [
@@ -113,7 +122,9 @@ __all__ = [
     "edit_requirement",
     "assign_requirement",
     "update_requirement_status",
+    "update_lifecycle_status",
     "bulk_create_requirements",
+    "_next_manual_requirement_id",
     # metrics
     "get_coverage_metrics",
     "create_coverage_metrics",
@@ -145,4 +156,10 @@ __all__ = [
     "create_link",
     "delete_link",
     "get_link",
+    # prompts
+    "get_all_prompts",
+    "get_prompt_by_key",
+    "update_prompt",
+    "reset_prompt_to_yaml",
+    "seed_prompts_from_yaml",
 ]
