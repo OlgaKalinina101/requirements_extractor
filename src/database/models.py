@@ -166,7 +166,7 @@ class Requirement(Base):
     discipline = Column(String(100), nullable=True, index=True)
     deadline = Column(Date, nullable=True)  # Due date for execution
     verification_method = Column(String(100), nullable=True)  # Analysis, Test, Inspection, Demonstration (from dictionary)
-    lifecycle_status = Column(String(100), nullable=True)  # Draft, In Review, Approved, Implemented, Verified, Rejected
+    lifecycle_status = Column(String(100), nullable=True)  # extracted, verification, accepted, assigned, in_progress, completed, closed
 
     # Review fields
     status = Column(String(50), default="pending", nullable=False, index=True)
@@ -199,6 +199,34 @@ class Requirement(Base):
         back_populates="target_requirement",
         cascade="all, delete-orphan",
     )
+    assignments = relationship(
+        "Assignment", back_populates="requirement", cascade="all, delete-orphan",
+        order_by="Assignment.assigned_at.desc()",
+    )
+
+
+class Assignment(Base):
+    """Assignment — links a requirement to an assignee (executor).
+
+    Each (re-)assignment creates a new row; only the latest active row
+    represents the current assignment.  Previous rows are kept for audit
+    (is_active=False).
+
+    Fields per ТЗ: requirement_id, assignee_id, assigned_by_id, assigned_at, deadline.
+    """
+    __tablename__ = "assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignee_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    assigned_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assigned_at = Column(DateTime, default=func.now(), nullable=False)
+    deadline = Column(Date, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    requirement = relationship("Requirement", back_populates="assignments")
+    assignee = relationship("User", foreign_keys=[assignee_id])
+    assigned_by = relationship("User", foreign_keys=[assigned_by_id])
 
 
 class CoverageMetrics(Base):

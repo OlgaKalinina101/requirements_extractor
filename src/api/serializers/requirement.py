@@ -1,6 +1,6 @@
 """Requirement serialization for API responses."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .base import _iso
 
@@ -20,6 +20,27 @@ def _serialize_links(links: List, is_outgoing: bool) -> List[Dict[str, Any]]:
     return result
 
 
+def _serialize_active_assignment(req) -> Optional[Dict[str, Any]]:
+    """Extract the active assignment info if available."""
+    assignments = getattr(req, "assignments", None)
+    if not assignments:
+        return None
+    active = next((a for a in assignments if a.is_active), None)
+    if not active:
+        return None
+    return {
+        "id": active.id,
+        "assignee_id": active.assignee_id,
+        "assigned_by_id": active.assigned_by_id,
+        "assigned_by_name": (
+            (active.assigned_by.full_name or active.assigned_by.email)
+            if active.assigned_by else None
+        ),
+        "assigned_at": _iso(active.assigned_at),
+        "deadline": active.deadline.isoformat() if active.deadline else None,
+    }
+
+
 def requirement_to_dict(req) -> Dict[str, Any]:
     """Convert Requirement model to full API response dict."""
     return {
@@ -37,6 +58,7 @@ def requirement_to_dict(req) -> Dict[str, Any]:
         "verification_method": getattr(req, "verification_method", None),
         "lifecycle_status": getattr(req, "lifecycle_status", None),
         "deadline": req.deadline.isoformat() if getattr(req, "deadline", None) else None,
+        "assignment": _serialize_active_assignment(req),
         "ai_suggested": req.ai_suggested,
         "human_edited": req.human_edited,
         "edit_reason": req.edit_reason,

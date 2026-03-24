@@ -197,7 +197,11 @@ async def assign_requirement(
     db=Depends(get_db),
     current_user=Depends(require_manager),
 ):
-    """Assign (or unassign) an executor to a requirement. Manager/admin only."""
+    """Assign (or unassign) an executor to a requirement. Manager/admin only.
+
+    Creates an Assignment record (separate entity per ТЗ) and updates the
+    denormalized assignee_id on the Requirement itself.
+    """
     if request.assignee_id is not None:
         assignee = crud.get_user_by_id(db, request.assignee_id)
         if not assignee:
@@ -206,6 +210,18 @@ async def assign_requirement(
     req = crud.assign_requirement(db, requirement_id, request.assignee_id)
     if not req:
         raise HTTPException(status_code=404, detail="Requirement not found")
+
+    if request.assignee_id is not None:
+        crud.create_assignment(
+            db, requirement_id,
+            assignee_id=request.assignee_id,
+            assigned_by_id=current_user.id,
+            deadline=request.deadline,
+        )
+    else:
+        crud.deactivate_assignments(db, requirement_id)
+
+    db.commit()
 
     new_assignee = request.assignee_id
     assignee_name = None
@@ -263,7 +279,10 @@ async def set_requirement_status(
     return {"requirement_id": requirement_id, "status": req.status}
 
 
-VALID_LIFECYCLE_STATUSES = {"draft", "in_review", "approved", "implemented", "verified", "rejected"}
+VALID_LIFECYCLE_STATUSES = {
+    "extracted", "verification", "accepted", "assigned",
+    "in_progress", "completed", "closed",
+}
 
 
 @router.post("/{requirement_id}/set-lifecycle-status")

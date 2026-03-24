@@ -89,6 +89,12 @@ from src.database.crud.document_pages import (
     get_document_page,
     get_document_pages,
 )
+from src.database.crud.assignments import (
+    create_assignment,
+    deactivate_assignments,
+    get_active_assignment,
+    get_assignment_history,
+)
 
 __all__ = [
     # users
@@ -171,4 +177,9 @@ __all__ = [
     "bulk_create_document_pages",
     "get_document_page",
     "get_document_pages",
+    # assignments
+    "create_assignment",
+    "deactivate_assignments",
+    "get_active_assignment",
+    "get_assignment_history",
 ]

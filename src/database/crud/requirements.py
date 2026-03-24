@@ -119,6 +119,7 @@ def create_requirement(
         page_number=page_number,
         bbox=bbox,
         status="pending",
+        lifecycle_status="extracted",
     )
     db.add(db_requirement)
     db.commit()
@@ -323,6 +324,7 @@ def bulk_create_requirements(
             "subitems": req.subitems if hasattr(req, "subitems") else None,
             "discipline": getattr(req, "suggested_discipline", None),
             "source_quote": getattr(req, "source_quote", None),
+            "lifecycle_status": "extracted",
         })
     logger.debug(f"[CRUD SAVE] Bulk inserting {len(requirements_data)} requirements")
     db.bulk_insert_mappings(Requirement, requirements_data)
