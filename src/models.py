@@ -110,6 +110,7 @@ class Requirement:
     visual_requirement_class: Optional[str] = None  # For images: signal_table|equipment_list|callout_note|layout_constraint
     confidence: float = 1.0  # AI confidence 0.0-1.0
     extraction_basis: Optional[str] = None  # explicit|list_item|list_block|table|inferred_from_mandatory_context|image_text
+    suggested_discipline: Optional[str] = None  # AI-suggested engineering discipline
     
     def to_dict(self) -> Dict[str, any]:
         """Convert requirement to dictionary for JSON serialization.
@@ -135,6 +136,7 @@ class Requirement:
             "visual_requirement_class": self.visual_requirement_class,
             "confidence": self.confidence,
             "extraction_basis": self.extraction_basis,
+            "suggested_discipline": self.suggested_discipline,
         }
 
 

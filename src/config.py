@@ -108,6 +108,20 @@ class PDFProcessorConfig:
     page_chunks: bool = True
     show_progress: bool = True
     max_workers: Optional[int] = None  # Auto-detect if None
+    # Pages with fewer embedded characters than this threshold are treated as
+    # scanned (image-only) and routed through OCR.
+    # Typical A4 text page: ~2500-3500 chars; technical drawings with labels
+    # in a native PDF: ~50-400 chars; true scans: 0-20 chars.
+    # 500 sits safely above drawing noise and below any real text page.
+    ocr_text_threshold: int = 500
+    # DPI used when rendering scanned pages for OCR.
+    # 300 DPI is the standard for document OCR — gives ~12 px per character at
+    # 10-12 pt, enough for Tesseract to distinguish similar Cyrillic glyphs.
+    ocr_dpi: int = 300
+    # Maximum parallel OCR workers.  Tesseract spawns a separate process per
+    # call (~50 MB each), so we can afford more workers than the old easyocr
+    # setup which loaded a 300 MB model per thread.
+    ocr_workers: int = 4
 
 
 @dataclass

@@ -84,6 +84,11 @@ from src.database.crud.prompts import (
     reset_prompt_to_yaml,
     seed_prompts_from_yaml,
 )
+from src.database.crud.document_pages import (
+    bulk_create_document_pages,
+    get_document_page,
+    get_document_pages,
+)
 
 __all__ = [
     # users
@@ -162,4 +167,8 @@ __all__ = [
     "update_prompt",
     "reset_prompt_to_yaml",
     "seed_prompts_from_yaml",
+    # document_pages
+    "bulk_create_document_pages",
+    "get_document_page",
+    "get_document_pages",
 ]

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from src.llm.base_client import BaseLLMClient
 from .config import OpenRouterConfig
 from .models import Requirement, RequirementType, RequirementPriority
 from .usage_tracker import get_usage_report, extract_usage_from_response, calculate_cost, UsageStats
@@ -169,7 +170,7 @@ AVAILABLE_MODELS = {
 }
 
 
-class OpenRouterClient:
+class OpenRouterClient(BaseLLMClient):
     """Client for OpenRouter API with multiple model support and image analysis."""
     
     def __init__(self, config: OpenRouterConfig):
@@ -399,6 +400,7 @@ class OpenRouterClient:
                 priority_str = item.get("priority", "Unknown")
                 req_priority = PRIORITY_MAPPING.get(priority_str, RequirementPriority.UNKNOWN)
                 
+                raw_discipline = item.get("suggested_discipline")
                 req = Requirement(
                     id=item.get("temp_id", item.get("id", f"REQ-{section_number.replace('.', '')}-IMG-XXX")),
                     text=item.get("text", ""),
@@ -412,7 +414,8 @@ class OpenRouterClient:
                     source_fragment=item.get("source_fragment"),
                     visual_requirement_class=item.get("visual_requirement_class"),
                     confidence=float(item.get("confidence", 0.8)),
-                    extraction_basis=item.get("extraction_basis", "image_text")
+                    extraction_basis=item.get("extraction_basis", "image_text"),
+                    suggested_discipline=raw_discipline if raw_discipline and str(raw_discipline).lower() != "null" else None,
                 )
                 requirements.append(req)
             
@@ -527,6 +530,7 @@ class OpenRouterClient:
                 priority_str = item.get("priority", "Unknown")
                 req_priority = PRIORITY_MAPPING.get(priority_str, RequirementPriority.UNKNOWN)
                 
+                raw_discipline = item.get("suggested_discipline")
                 req = Requirement(
                     id=item.get("temp_id", item.get("id", f"REQ-{section_number.replace('.', '')}-XXX")),
                     text=item.get("text", ""),
@@ -539,7 +543,8 @@ class OpenRouterClient:
                     source_quote=item.get("source_quote"),
                     source_fragment=item.get("source_fragment"),
                     confidence=float(item.get("confidence", 1.0)),
-                    extraction_basis=item.get("extraction_basis")
+                    extraction_basis=item.get("extraction_basis"),
+                    suggested_discipline=raw_discipline if raw_discipline and str(raw_discipline).lower() != "null" else None,
                 )
                 requirements.append(req)
             

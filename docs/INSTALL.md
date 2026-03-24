@@ -65,6 +65,7 @@ Frontend запустится на `http://localhost:5173`
 |---|---|---|
 | `OPENROUTER_API_KEY` | ✅ | API-ключ OpenRouter (https://openrouter.ai/keys) |
 | `DATABASE_URL` | ✅ | URL PostgreSQL (`postgresql://user:pass@host:5432/db`) |
+| `ALLOWED_ORIGINS` | — | CORS: список origins через запятую (default: `http://localhost:5173,http://localhost:8080`) |
 | `LOG_LEVEL` | — | Уровень логов: `DEBUG`, `INFO` (по умолчанию), `WARNING` |
 
 ---
@@ -123,3 +124,15 @@ alembic current
 | `003_add_projects_and_model_used` | Добавлен `model_used` в documents |
 | `004_add_subitems` | Подтребования (subitems) |
 | `005_add_indexes` | Индексы на FK-колонках для производительности |
+| `006_add_users_and_auth` | Пользователи, JWT |
+| `007_add_dictionary_items` | Справочники |
+| `008_add_requirement_history` | История изменений требований |
+| `009_add_discipline_deadline` | Дисциплина, сроки |
+| `010_add_parent_id` | Иерархия требований |
+| `011_add_verification_method_and_document_type` | Метод верификации, тип документа |
+| `012_add_requirement_links` | Связи между требованиями |
+| `013_add_project_requirement_manager` | Менеджер требований проекта |
+| `014_add_lifecycle_status` | Статус жизненного цикла |
+| `015_prompts_table` | Таблица промптов |
+| `016_add_document_pages` | Страницы документов, text_blocks |
+| `017_add_source_quote` | Цитата из источника |

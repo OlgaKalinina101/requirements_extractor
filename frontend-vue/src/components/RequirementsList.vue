@@ -14,6 +14,7 @@
       @view-page="$emit('view-page', $event)"
       @assigned="$emit('assigned', $event)"
       @status-changed="$emit('status-changed', $event)"
+      @highlight="$emit('highlight', $event)"
     />
     </div>
   </div>
@@ -27,5 +28,5 @@ defineProps({
   showDetailLink: { type: Boolean, default: true },
 })
 
-defineEmits(['accept', 'reject', 'edit', 'view-page', 'assigned', 'status-changed'])
+defineEmits(['accept', 'reject', 'edit', 'view-page', 'assigned', 'status-changed', 'highlight'])
 </script>

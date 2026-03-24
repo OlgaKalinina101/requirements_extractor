@@ -51,9 +51,9 @@
         <PDFViewer
           v-if="documentsStore.currentDocument"
           :document-id="documentsStore.currentDocument.id"
-          :filename="documentsStore.currentDocument.filename"
           :initial-page="currentPdfPage"
           :total-pages-count="documentsStore.currentDocument.total_pages || 0"
+          :active-requirement="activeRequirement"
           @page-changed="onPdfPageChanged"
           @loaded="onPdfLoaded"
           ref="pdfViewer"
@@ -109,6 +109,7 @@
                   @view-page="jumpToPdfPage"
                   @assigned="handleAssigned"
                   @status-changed="handleStatusChanged"
+                  @highlight="handleHighlight"
                 />
                 </div>
               </v-card-text>
@@ -301,11 +302,11 @@
 <script setup>
 import { ref, computed, onMounted, watch, provide, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useDocumentsStore } from '../stores/documents'
-import { useRequirementsStore } from '../stores/requirements'
-import RequirementsList from '../components/RequirementsList.vue'
-import PDFViewer from '../components/PDFViewer.vue'
-import MetricsPanel from '../components/MetricsPanel.vue'
+import { useDocumentsStore } from '@/stores/documents'
+import { useRequirementsStore } from '@/stores/requirements'
+import RequirementsList from '@/components/RequirementsList.vue'
+import PDFViewer from '@/components/PDFViewer.vue'
+import MetricsPanel from '@/components/MetricsPanel.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDictionariesStore } from '@/stores/dictionaries'
 import { useNotificationsStore } from '@/stores/notifications'
@@ -327,7 +328,7 @@ async function triggerExport(format) {
   try {
     await downloadExport(documentsStore.currentDocument.id, format)
   } catch (e) {
-    console.error('Export failed', e)
+    notifications.notifyError(`Ошибка экспорта: ${e.response?.data?.detail || e.message}`)
   } finally {
     exportLoading.value = false
   }
@@ -336,6 +337,11 @@ async function triggerExport(format) {
 const pdfViewer = ref(null)
 const requirementsScrollContainer = ref(null)
 const currentPdfPage = ref(1)
+const activeRequirement = ref(null)
+
+const handleHighlight = (req) => {
+  activeRequirement.value = req
+}
 const statusFilter = ref(null)
 const typeFilter = ref(null)
 const disciplineFilter = ref(null)
@@ -357,16 +363,10 @@ provide('users', users)
 provide('documentId', computed(() => route.params.documentId))
 
 // Filter options come from the dictionaries store (loaded from DB)
-const statusOptions = computed(() => dicts.statusOptions)
-const typeOptions = computed(() => dicts.typeOptions)
-const priorityOptions = computed(() => dicts.priorityOptions)
-const disciplineOptions = computed(() => {
-  const disciplines = new Set()
-  requirementsStore.requirements.forEach(r => {
-    if (r.discipline) disciplines.add(r.discipline)
-  })
-  return [...disciplines].sort()
-})
+const statusOptions    = computed(() => dicts.statusOptions)
+const typeOptions      = computed(() => dicts.typeOptions)
+const priorityOptions  = computed(() => dicts.priorityOptions)
+const disciplineOptions = computed(() => dicts.disciplineOptions)
 
 const updateFilters = () => {
   requirementsStore.setFilters({
@@ -400,19 +400,25 @@ const handleStatusChanged = ({ requirementId, status }) => {
 const handleAccept = async (requirementId) => {
   try {
     await requirementsStore.acceptRequirement(requirementId)
-  } catch { /* store handles error */ }
+  } catch (e) {
+    notifications.notifyError(requirementsStore.error || 'Ошибка принятия требования')
+  }
 }
 
 const handleReject = async (requirementId, reason) => {
   try {
     await requirementsStore.rejectRequirement(requirementId, reason)
-  } catch { /* store handles error */ }
+  } catch (e) {
+    notifications.notifyError(requirementsStore.error || 'Ошибка отклонения требования')
+  }
 }
 
 const handleEdit = async (requirementId, editedText, reason, type = null, priority = null, discipline = null, verification_method = null, deadline = null) => {
   try {
     await requirementsStore.editRequirement(requirementId, editedText, reason, null, type, priority, discipline, verification_method, deadline)
-  } catch { /* store handles error */ }
+  } catch (e) {
+    notifications.notifyError(requirementsStore.error || 'Ошибка редактирования требования')
+  }
 }
 
 const createRequirement = async () => {

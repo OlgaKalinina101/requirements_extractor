@@ -86,36 +86,27 @@
 </template>
 
 <script setup>
-import { computed, watch } from 'vue'
+import { watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
 import { useDictionariesStore } from '@/stores/dictionaries'
+import { useModelsStore } from '@/stores/models'
 
-const router = useRouter()
+const router        = useRouter()
 const notifications = useNotificationsStore()
-const auth = useAuthStore()
-const dicts = useDictionariesStore()
+const auth          = useAuthStore()
+const dicts         = useDictionariesStore()
+const modelsStore   = useModelsStore()
 
-// Load dictionaries once when user is authenticated
 watch(() => auth.isAuthenticated, (val) => {
-  if (val) dicts.loadAll()
-  else dicts.reset()
+  if (val) {
+    dicts.loadAll()
+    modelsStore.fetchModels()
+  } else {
+    dicts.reset()
+  }
 }, { immediate: true })
-
-const roleColor = computed(() => {
-  if (auth.role === 'admin') return 'error'
-  if (auth.role === 'manager') return 'primary'
-  if (auth.role === 'department_head') return 'teal'
-  return 'secondary'
-})
-
-const roleName = computed(() => {
-  if (auth.role === 'admin') return 'Администратор'
-  if (auth.role === 'manager') return 'Менеджер'
-  if (auth.role === 'department_head') return 'Руководитель отдела по задачам'
-  return 'Пользователь'
-})
 
 const goHome = () => router.push('/')
 

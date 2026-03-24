@@ -18,7 +18,7 @@
                 v-for="doc in documentsStore.documents.slice(0, 5)"
                 :key="doc.id"
                 :title="doc.filename"
-                :subtitle="`${doc.total_pages || 0} страниц • ${formatDate(doc.uploaded_at)}`"
+                :subtitle="`${doc.total_pages || 0} страниц • ${formatDate(doc.uploaded_at, { time: true })}`"
                 :prepend-icon="getStatusIcon(doc.status)"
                 @click="goToReview(doc.id)"
               >
@@ -57,53 +57,16 @@
 <script setup>
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useDocumentsStore } from '../stores/documents'
-import DocumentUpload from '../components/DocumentUpload.vue'
+import { useDocumentsStore } from '@/stores/documents'
+import DocumentUpload from '@/components/DocumentUpload.vue'
+import { formatDate, getDocStatusIcon, getDocStatusColor, getDocStatusText } from '@/utils/formatters'
 
-const router = useRouter()
+const router         = useRouter()
 const documentsStore = useDocumentsStore()
 
-const formatDate = (dateString) => {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  return date.toLocaleDateString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
-const getStatusIcon = (status) => {
-  const icons = {
-    pending: 'mdi-clock-outline',
-    processing: 'mdi-loading',
-    completed: 'mdi-check-circle',
-    failed: 'mdi-alert-circle'
-  }
-  return icons[status] || 'mdi-file'
-}
-
-const getStatusColor = (status) => {
-  const colors = {
-    pending: 'grey',
-    processing: 'blue',
-    completed: 'green',
-    failed: 'red'
-  }
-  return colors[status] || 'grey'
-}
-
-const getStatusText = (status) => {
-  const texts = {
-    pending: 'Ожидает',
-    processing: 'Обработка',
-    completed: 'Готово',
-    failed: 'Ошибка'
-  }
-  return texts[status] || status
-}
+const getStatusIcon  = getDocStatusIcon
+const getStatusColor = getDocStatusColor
+const getStatusText  = getDocStatusText
 
 const goToReview = (documentId) => {
   router.push(`/review/${documentId}`)

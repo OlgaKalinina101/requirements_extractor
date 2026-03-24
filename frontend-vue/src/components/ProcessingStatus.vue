@@ -82,31 +82,26 @@ const formatTime = (timestamp) => {
 }
 
 const connectWebSocket = () => {
-  const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/logs'
-  
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${window.location.host}/ws/logs`
+
   try {
     ws = new WebSocket(wsUrl)
-    
+
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      
-      if (data.type === 'log') {
-        logs.value.push({
-          level: data.level,
-          message: data.message,
-          timestamp: data.timestamp
-        })
-        // Keep only last 100 logs
-        if (logs.value.length > 100) {
-          logs.value.shift()
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'log') {
+          logs.value.push({ level: data.level, message: data.message, timestamp: data.timestamp })
+          if (logs.value.length > 100) logs.value.shift()
         }
-      } else if (data.type === 'progress') {
-        // Progress updates are handled by parent component
+      } catch {
+        // Malformed message; skip
       }
     }
-    
+
     ws.onerror = () => {}
-    
+
     ws.onclose = () => {
       setTimeout(connectWebSocket, 3000)
     }

@@ -11,10 +11,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 
-# Import OpenRouter client (primary)
-from .openrouter_client import OpenRouterClient, get_available_models
-# DeepSeek imported only if explicitly needed (legacy mode)
+from .openrouter_client import get_available_models
 from .models import RequirementsRegistry, Requirement, TableOfContentsEntry
+from src.llm.factory import create_llm_client
 from .config import ApplicationConfig
 from .logger import get_logger
 
@@ -56,30 +55,23 @@ class RequirementsExtractor:
         Raises:
             ValueError: If provider is not supported or API key is missing
         """
-        if self.ai_provider == "openrouter":
-            if not self.config.openrouter.api_key:
-                raise ValueError(
-                    "OPENROUTER_API_KEY not found. Please set it in .env file or environment variables. "
-                    "Get your key at: https://openrouter.ai/keys"
-                )
-            self.ai_client = OpenRouterClient(self.config.openrouter)
-            if model_id:
-                self.ai_client.set_model(model_id)
-            logger.info(f"OpenRouter client set up with model: {self.ai_client.selected_model}")
-        elif self.ai_provider == "deepseek":
-            # Legacy DeepSeek support (only if explicitly set)
-            from .deepseek_client import DeepSeekClient
-            if not self.config.deepseek.api_key:
-                raise ValueError(
-                    "DEEPSEEK_API_KEY not found. Please set it in .env file or switch to OpenRouter."
-                )
-            self.ai_client = DeepSeekClient(self.config.deepseek)
-            logger.info("DeepSeek client set up (legacy mode)")
-        else:
+        if self.ai_provider == "openrouter" and not self.config.openrouter.api_key:
             raise ValueError(
-                f"Unknown provider: {self.ai_provider}. "
-                "Supported providers: 'openrouter' (recommended) or 'deepseek' (legacy)"
+                "OPENROUTER_API_KEY not found. Please set it in .env file or environment variables. "
+                "Get your key at: https://openrouter.ai/keys"
             )
+        if self.ai_provider == "deepseek" and not self.config.deepseek.api_key:
+            raise ValueError(
+                "DEEPSEEK_API_KEY not found. Please set it in .env file or switch to OpenRouter."
+            )
+
+        self.ai_client = create_llm_client(self.config)
+        if model_id and hasattr(self.ai_client, "set_model"):
+            self.ai_client.set_model(model_id)
+        logger.info(
+            f"{self.ai_provider} client set up"
+            + (f" with model: {self.ai_client.selected_model}" if hasattr(self.ai_client, "selected_model") else "")
+        )
     
     async def extract_requirements_from_all_pages(self, image_dir: Optional[Path] = None, batch_size: int = 7, progress_callback=None) -> List[Requirement]:
         """Extract requirements from ALL pages directly without TOC parsing.

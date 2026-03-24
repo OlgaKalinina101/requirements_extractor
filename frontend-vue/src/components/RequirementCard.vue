@@ -3,6 +3,8 @@
     class="mb-4 requirement-card"
     :color="cardBgColor"
     @click="handleCardClick"
+    @mouseenter="$emit('highlight', requirement)"
+    @mouseleave="$emit('highlight', null)"
   >
     <v-card-title class="d-flex align-center flex-wrap gap-1">
       <v-chip size="small" class="mr-2">{{ requirement.requirement_id }}</v-chip>
@@ -48,7 +50,14 @@
         >
           Страница {{ requirement.page_number }}
         </v-chip>
-        <v-chip size="small" variant="tonal" v-if="requirement.discipline" color="grey">
+        <v-chip
+          size="small"
+          variant="tonal"
+          v-if="requirement.discipline"
+          color="deep-purple"
+          prepend-icon="mdi-robot-outline"
+          :title="'Дисциплина (предложено AI)'"
+        >
           {{ requirement.discipline }}
         </v-chip>
         <v-chip size="small" variant="tonal" v-if="requirement.verification_method" color="teal">
@@ -316,7 +325,7 @@ const props = defineProps({
   showDetailLink: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['accept', 'reject', 'edit', 'view-page', 'assigned', 'status-changed'])
+const emit = defineEmits(['accept', 'reject', 'edit', 'view-page', 'assigned', 'status-changed', 'highlight'])
 
 const showRejectDialog = ref(false)
 const showEditDialog = ref(false)

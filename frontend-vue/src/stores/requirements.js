@@ -1,182 +1,163 @@
 import { defineStore } from 'pinia'
-import { documentsApi, requirementsApi } from '../services/api'
+import { ref, computed } from 'vue'
+import { documentsApi, requirementsApi } from '@/services/api'
 
-export const useRequirementsStore = defineStore('requirements', {
-  state: () => ({
-    requirements: [],
-    currentRequirement: null,
-    filters: {
-      status: null,
-      type: null,
-      discipline: null
-    },
-    loading: false,
-    error: null
-  }),
+export const useRequirementsStore = defineStore('requirements', () => {
+  const requirements      = ref([])
+  const currentRequirement = ref(null)
+  const filters = ref({
+    status:     null,
+    type:       null,
+    discipline: null,
+  })
+  const loading = ref(false)
+  const error   = ref(null)
 
-  getters: {
-    filteredRequirements: (state) => {
-      let filtered = state.requirements
+  // ── Getters ───────────────────────────────────────────────────────────────
 
-      if (state.filters.status) {
-        filtered = filtered.filter(r => r.status === state.filters.status)
-      }
+  const filteredRequirements = computed(() => {
+    let list = requirements.value
+    if (filters.value.status)     list = list.filter(r => r.status     === filters.value.status)
+    if (filters.value.type)       list = list.filter(r => r.type       === filters.value.type)
+    if (filters.value.discipline) list = list.filter(r => r.discipline === filters.value.discipline)
+    return list
+  })
 
-      if (state.filters.type) {
-        filtered = filtered.filter(r => r.type === state.filters.type)
-      }
+  const stats = computed(() => {
+    const s = { total: requirements.value.length, pending: 0, accepted: 0, rejected: 0, modified: 0 }
+    requirements.value.forEach(r => { if (r.status in s) s[r.status]++ })
+    return s
+  })
 
-      if (state.filters.discipline) {
-        filtered = filtered.filter(r => r.discipline === state.filters.discipline)
-      }
+  // ── Actions ───────────────────────────────────────────────────────────────
 
-      return filtered
-    },
-
-    stats: (state) => {
-      const stats = {
-        total: state.requirements.length,
-        pending: 0,
-        accepted: 0,
-        rejected: 0,
-        modified: 0
-      }
-
-      state.requirements.forEach(req => {
-        if (req.status in stats) {
-          stats[req.status]++
-        }
-      })
-
-      return stats
+  async function fetchRequirements(documentId, params = {}) {
+    loading.value = true
+    error.value   = null
+    try {
+      const { data } = await documentsApi.getRequirements(documentId, params)
+      requirements.value = data.requirements || []
+      return requirements.value
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    } finally {
+      loading.value = false
     }
-  },
+  }
 
-  actions: {
-    async fetchRequirements(documentId, filters = {}) {
-      this.loading = true
-      this.error = null
-      try {
-        const response = await documentsApi.getRequirements(documentId, filters)
-        this.requirements = response.data.requirements || []
-        return this.requirements
-      } catch (error) {
-        this.error = error.message
-        throw error
-      } finally {
-        this.loading = false
+  async function fetchRequirement(id) {
+    loading.value = true
+    error.value   = null
+    try {
+      const { data } = await requirementsApi.getById(id)
+      currentRequirement.value = data
+      return data
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchAllRequirements(params = {}) {
+    loading.value = true
+    error.value   = null
+    try {
+      const { data } = await requirementsApi.getAll(params)
+      requirements.value = data.requirements || []
+      return requirements.value
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function acceptRequirement(id) {
+    error.value = null
+    try {
+      await requirementsApi.accept(id)
+      const req = requirements.value.find(r => r.id === id)
+      if (req) req.status = 'accepted'
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    }
+  }
+
+  async function rejectRequirement(id, reason = null) {
+    error.value = null
+    try {
+      await requirementsApi.reject(id, reason)
+      const req = requirements.value.find(r => r.id === id)
+      if (req) { req.status = 'rejected'; req.edit_reason = reason }
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    }
+  }
+
+  async function editRequirement(id, editedText, reason = null, editedBy = null, type = null, priority = null, discipline = null, verification_method = null, deadline = null) {
+    error.value = null
+    try {
+      const { data } = await requirementsApi.edit(id, editedText, reason, editedBy, type, priority, discipline, verification_method, deadline)
+      const req = requirements.value.find(r => r.id === id)
+      if (req) {
+        req.text               = editedText
+        req.status             = 'modified'
+        req.human_edited       = editedText
+        req.edit_reason        = reason
+        req.edited_by          = editedBy
+        req.edited_at          = data.edited_at
+        if (type !== null)                req.type                = type
+        if (priority !== null)            req.priority            = priority
+        if (discipline !== undefined)     req.discipline          = discipline
+        if (verification_method !== undefined) req.verification_method = verification_method
+        if (deadline !== undefined)       req.deadline            = deadline
       }
-    },
+      return data
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    }
+  }
 
-    async fetchRequirement(id) {
-      this.loading = true
-      this.error = null
-      try {
-        const response = await requirementsApi.getById(id)
-        this.currentRequirement = response.data
-        return response.data
-      } catch (error) {
-        this.error = error.message
-        throw error
-      } finally {
-        this.loading = false
-      }
-    },
+  async function createRequirement(documentId, payload) {
+    error.value = null
+    try {
+      const { data } = await documentsApi.createRequirement(documentId, payload)
+      await fetchRequirements(documentId)
+      return data
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    }
+  }
 
-    async acceptRequirement(id) {
-      try {
-        await requirementsApi.accept(id)
-        // Update local state
-        const req = this.requirements.find(r => r.id === id)
-        if (req) {
-          req.status = 'accepted'
-        }
-      } catch (error) {
-        this.error = error.message
-        throw error
-      }
-    },
+  async function deleteRequirement(id) {
+    error.value = null
+    try {
+      await requirementsApi.delete(id)
+      requirements.value = requirements.value.filter(r => r.id !== id)
+    } catch (e) {
+      error.value = e.response?.data?.detail || e.message
+      throw e
+    }
+  }
 
-    async rejectRequirement(id, reason = null) {
-      try {
-        await requirementsApi.reject(id, reason)
-        // Update local state
-        const req = this.requirements.find(r => r.id === id)
-        if (req) {
-          req.status = 'rejected'
-          req.edit_reason = reason
-        }
-      } catch (error) {
-        this.error = error.message
-        throw error
-      }
-    },
+  function setFilters(newFilters) {
+    filters.value = { ...filters.value, ...newFilters }
+  }
 
-    async editRequirement(id, editedText, reason = null, editedBy = null, type = null, priority = null, discipline = null, verification_method = null, deadline = null) {
-      try {
-        const response = await requirementsApi.edit(id, editedText, reason, editedBy, type, priority, discipline, verification_method, deadline)
-        // Update local state
-        const req = this.requirements.find(r => r.id === id)
-        if (req) {
-          req.text = editedText
-          req.status = 'modified'
-          req.human_edited = editedText
-          req.edit_reason = reason
-          req.edited_by = editedBy
-          req.edited_at = response.data.edited_at
-          if (type) req.type = type
-          if (priority) req.priority = priority
-          if (discipline !== undefined) req.discipline = discipline
-          if (verification_method !== undefined) req.verification_method = verification_method
-          if (deadline !== undefined) req.deadline = deadline
-        }
-        return response.data
-      } catch (error) {
-        this.error = error.message
-        throw error
-      }
-    },
-
-    setFilters(filters) {
-      this.filters = { ...this.filters, ...filters }
-    },
-
-    async createRequirement(documentId, data) {
-      try {
-        const response = await documentsApi.createRequirement(documentId, data)
-        // Refetch the full list so the new item has all related fields
-        // (section, document, assignee) and appears correctly in all filters
-        await this.fetchRequirements(documentId)
-        return response.data
-      } catch (error) {
-        this.error = error.message
-        throw error
-      }
-    },
-
-    async deleteRequirement(id) {
-      try {
-        await requirementsApi.delete(id)
-        this.requirements = this.requirements.filter(r => r.id !== id)
-      } catch (error) {
-        this.error = error.message
-        throw error
-      }
-    },
-
-    async fetchAllRequirements(params = {}) {
-      this.loading = true
-      this.error = null
-      try {
-        const response = await requirementsApi.getAll(params)
-        this.requirements = response.data.requirements || []
-        return this.requirements
-      } catch (error) {
-        this.error = error.message
-        throw error
-      } finally {
-        this.loading = false
-      }
-    },
+  return {
+    requirements, currentRequirement, filters, loading, error,
+    filteredRequirements, stats,
+    fetchRequirements, fetchRequirement, fetchAllRequirements,
+    acceptRequirement, rejectRequirement, editRequirement,
+    createRequirement, deleteRequirement,
+    setFilters,
   }
 })

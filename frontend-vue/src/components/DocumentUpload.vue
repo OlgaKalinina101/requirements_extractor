@@ -50,7 +50,6 @@
           prepend-icon="mdi-file-pdf-box"
           show-size
           :disabled="uploading"
-          @change="onFileSelected"
         ></v-file-input>
 
         <v-select
@@ -118,9 +117,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useDocumentsStore } from '../stores/documents'
-import { useProjectsStore } from '../stores/projects'
+import { ref, computed } from 'vue'
+import { useDocumentsStore } from '@/stores/documents'
+import { useProjectsStore } from '@/stores/projects'
+import { useModelsStore } from '@/stores/models'
+import { useNotificationsStore } from '@/stores/notifications'
 import { useRouter } from 'vue-router'
 import ProcessingStatus from './ProcessingStatus.vue'
 import ExtractionResults from './ExtractionResults.vue'
@@ -132,7 +133,9 @@ const props = defineProps({
 const emit = defineEmits(['uploaded', 'results-shown', 'results-hidden'])
 
 const documentsStore = useDocumentsStore()
-const projectsStore = useProjectsStore()
+const projectsStore  = useProjectsStore()
+const modelsStore    = useModelsStore()
+const notifications  = useNotificationsStore()
 const router = useRouter()
 
 // Local project selection (used when no projectId prop is given)
@@ -170,19 +173,7 @@ const showResults = ref(false)
 const extractionResults = ref(null)
 let ws = null
 
-const availableModels = [
-  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
-  { id: 'claude-opus-4.6', name: 'Claude Opus 4.6' },
-  { id: 'gpt-4.1', name: 'GPT-4.1' },
-  { id: 'qwen-3.5-plus', name: 'Qwen3.5 Plus 2026-02-15' },
-  { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro Preview' }
-]
-
-const onFileSelected = (event) => {
-  if (event.target.files && event.target.files.length > 0) {
-    file.value = event.target.files[0]
-  }
-}
+const availableModels = computed(() => modelsStore.availableModels)
 
 const connectWebSocket = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -258,7 +249,7 @@ const handleUpload = async () => {
     }
     
     statusMessage.value = `Ошибка: ${error.response?.data?.detail || error.message}`
-    alert(`Ошибка загрузки: ${error.response?.data?.detail || error.message}`)
+    notifications.notifyError(`Ошибка загрузки: ${error.response?.data?.detail || error.message}`)
     uploading.value = false
   }
 }

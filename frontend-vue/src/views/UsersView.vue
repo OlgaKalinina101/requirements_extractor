@@ -100,8 +100,9 @@ import { ref, onMounted } from 'vue'
 import { usersApi } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationsStore } from '@/stores/notifications'
+import { getRoleColor, getRoleName, formatDate } from '@/utils/formatters'
 
-const auth = useAuthStore()
+const auth          = useAuthStore()
 const notifications = useNotificationsStore()
 
 const users = ref([])
@@ -129,18 +130,8 @@ const roleOptions = [
   { label: 'Пользователь (исполнитель)', value: 'user' },
 ]
 
-function roleColor(role) {
-  return role === 'admin' ? 'error' : role === 'manager' ? 'primary' : role === 'department_head' ? 'teal' : 'secondary'
-}
-
-function roleName(role) {
-  return roleOptions.find(r => r.value === role)?.label || role
-}
-
-function formatDate(iso) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('ru-RU')
-}
+const roleColor = getRoleColor
+const roleName  = getRoleName
 
 async function loadUsers() {
   loading.value = true

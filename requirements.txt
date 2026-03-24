@@ -1,6 +1,10 @@
 # Core dependencies
 pymupdf>=1.27.0
 pymupdf4llm>=0.3.0
+
+# OCR for scanned PDFs — Tesseract installed via apt-get in Dockerfile
+pytesseract>=0.3.10
+opencv-python-headless>=4.8.0
 pyyaml>=6.0
 python-dotenv>=1.0.0
 

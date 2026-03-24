@@ -27,6 +27,7 @@
 │    /api/extract             - загрузка PDF + извлечение      │
 │    /api/documents/{id}/export/*  - Word / JSON / TXT         │
 │    /api/documents/{id}/pdf  - PDF для просмотра              │
+│    /api/models               - список AI-моделей для извлечения│
 │  WebSocket:                                                   │
 │    /ws/logs                 - real-time логи + прогресс      │
 └──────────────────────────────────────────────────────────────┘
@@ -37,11 +38,13 @@
 │  src/extraction_service.py — ExtractionService               │
 │    Оркестрирует полный pipeline: файл → PDF → AI → БД        │
 │    Шаги: _save_file, _create_db_document, _init_extractor,   │
-│           _extract_pdf_pages, _extract_requirements,          │
-│           _save_to_db, _save_coverage_metrics, _build_word   │
+│           _extract_pdf_pages, _extract_requirements,           │
+│           _refine_page_numbers (page_finder fallback),        │
+│           _save_to_db, _save_coverage_metrics, _build_word    │
 │                                                               │
 │  src/requirements_extractor.py — RequirementsExtractor       │
-│    Параллельная пострйнная обработка батчами (batch_size=7)  │
+│    LLM-клиент через src/llm/factory (BaseLLMClient)          │
+│    Параллельная постраничная обработка батчами (batch_size=7)│
 │    Текст + изображения на каждой странице                    │
 │                                                               │
 │  src/word_exporter.py — генерация Word из БД и из памяти    │
@@ -50,7 +53,8 @@
 ┌──────────────────────────────────────────────────────────────┐
 │                    DATA ACCESS LAYER                          │
 ├──────────────────────────────────────────────────────────────┤
-│  src/database/crud.py — все CRUD-операции                    │
+│  src/database/crud/ — CRUD-модули по доменам (requirements,  │
+│    documents, projects, users и т.д.)                         │
 │  src/database/models.py — SQLAlchemy ORM модели              │
 │  src/database/database.py — QueuePool (size=5, overflow=10) │
 └──────────────────────────────────────────────────────────────┘
@@ -61,6 +65,7 @@
 │  Таблицы:                                                     │
 │    projects              - проекты                           │
 │    documents             - документы (с model_used)          │
+│    document_pages        - текст и text_blocks по страницам  │
 │    sections              - разделы документов                │
 │    requirements          - извлечённые требования            │
 │    coverage_metrics      - метрики покрытия                  │
@@ -132,6 +137,7 @@
                               │ priority             │
                               │ page_number          │
                               │ source_page          │
+                              │ source_quote         │
                               │ source_type          │
                               │ status               │
                               │ ai_suggested         │
@@ -190,6 +196,9 @@ POST /api/extract (PDF upload)
 │            └─ _async_extract_from_image_simple() (если есть изображения)
 │                run_in_executor → OpenRouterClient.extract_requirements_from_image()
 │          Прогресс: completed_pages / total_pages, 30%→88%
+│
+├─ [89%]  ExtractionService._refine_page_numbers()
+│          page_finder: fallback для source_page (текстовый поиск)
 │
 ├─ [90%]  ExtractionService._save_to_db()
 │          Создать одну секцию "All Pages"
@@ -292,13 +301,14 @@ asyncio event loop (main thread)
 ```
 test2/
 │
-├── api_server.py              # FastAPI приложение (1248 строк)
-│                              # Все эндпоинты, WebSocket, Pydantic-модели
+├── api_server.py              # Точка входа: uvicorn, подключает src.api.app
 │
 ├── src/
 │   ├── extraction_service.py  # ExtractionService — оркестратор pipeline
 │   ├── requirements_extractor.py  # Параллельная AI-обработка страниц
-│   ├── openrouter_client.py   # HTTP-клиент OpenRouter + retry
+│   ├── api/                   # FastAPI приложение, роутеры, serializers
+│   ├── llm/                   # BaseLLMClient, factory, json_utils
+│   ├── openrouter_client.py   # HTTP-клиент OpenRouter (BaseLLMClient)
 │   ├── word_exporter.py       # Генерация Word (из памяти и из БД)
 │   ├── pdf_processor.py       # Парсинг PDF, извлечение изображений
 │   ├── models.py              # Pydantic-модели (Requirement, Registry и т.д.)
@@ -308,7 +318,7 @@ test2/
 │   └── database/
 │       ├── database.py        # Engine (QueuePool), SessionLocal, init_db
 │       ├── models.py          # SQLAlchemy ORM (Document, Requirement и т.д.)
-│       └── crud.py            # Все CRUD-функции (~600 строк)
+│       └── crud/              # CRUD по доменам (requirements, documents, ...)
 │
 ├── alembic/
 │   ├── versions/
@@ -326,9 +336,12 @@ test2/
 │   │   ├── router/index.js
 │   │   ├── services/api.js            # Централизованный API-слой (axios)
 │   │   ├── stores/
+│   │   │   ├── auth.js
 │   │   │   ├── documents.js
 │   │   │   ├── projects.js
 │   │   │   ├── requirements.js
+│   │   │   ├── dictionaries.js
+│   │   │   ├── models.js              # AI-модели с /api/models
 │   │   │   └── notifications.js       # Глобальные уведомления
 │   │   ├── components/
 │   │   │   ├── DocumentUpload.vue     # Загрузка + WebSocket прогресс
@@ -344,6 +357,8 @@ test2/
 │   │       ├── ProjectView.vue
 │   │       ├── ReviewView.vue         # Split View: PDF + требования
 │   │       ├── DashboardView.vue      # Статистика проектов из API
+│   │       ├── ExecutorDashboardView.vue  # Дашборд исполнителя
+│   │       ├── AllRequirementsView.vue   # Все требования системы
 │   │       ├── RequirementDetailView.vue  # Детали + история изменений
 │   │       └── AdminView.vue          # Справочники (статические)
 │   ├── package.json

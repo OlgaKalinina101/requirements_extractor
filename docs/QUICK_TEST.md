@@ -80,10 +80,15 @@ cd frontend-vue && npm run dev
 
 | Метод | URL | Описание |
 |---|---|---|
+| `POST` | `/api/auth/login` | Вход (email, password) |
+| `GET` | `/api/auth/me` | Текущий пользователь |
+| `GET` | `/api/users` | Список пользователей (admin) |
+| `POST` | `/api/users` | Создать пользователя (admin) |
 | `GET` | `/api/projects` | Список проектов |
 | `POST` | `/api/projects` | Создать проект |
 | `GET` | `/api/projects/{id}` | Детали проекта |
 | `POST` | `/api/extract` | Загрузить PDF и запустить извлечение |
+| `GET` | `/api/models` | Список AI-моделей |
 | `GET` | `/api/documents` | Список документов |
 | `GET` | `/api/documents/{id}` | Детали документа |
 | `GET` | `/api/documents/{id}/requirements` | Требования документа |
@@ -92,6 +97,11 @@ cd frontend-vue && npm run dev
 | `POST` | `/api/requirements/{id}/accept` | Принять требование |
 | `POST` | `/api/requirements/{id}/reject` | Отклонить требование |
 | `POST` | `/api/requirements/{id}/edit` | Редактировать требование |
+| `POST` | `/api/requirements/{id}/assign` | Назначить исполнителя |
+| `POST` | `/api/requirements/{id}/links` | Добавить связь |
+| `GET` | `/api/requirements/{id}/history` | История изменений |
+| `GET` | `/api/requirements/{id}/comments` | Комментарии |
+| `POST` | `/api/comments` | Создать комментарий |
 | `GET` | `/api/documents/{id}/export/word` | Экспорт Word |
 | `GET` | `/api/documents/{id}/export/json` | Экспорт JSON |
 | `GET` | `/api/documents/{id}/export/txt` | Экспорт TXT |

@@ -56,6 +56,7 @@ class ExtractionService:
         self.db_document = None
         self.all_requirements: List[Requirement] = []
         self.total_requirements_saved: int = 0
+        self.page_blocks_list: List[Dict] = []  # per-page text_blocks for DocumentPage
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -88,9 +89,11 @@ class ExtractionService:
             await self._progress("extract", 30, "Начало извлечения требований")
             await self._update_db_status("processing", db_session_factory)
             await self._extract_requirements()
+            await self._refine_page_numbers()
 
             await self._progress("save", 90, "Сохранение требований в базу данных")
             await self._save_to_db(db_session_factory)
+            await self._save_document_pages(db_session_factory)
             await self._save_coverage_metrics(db_session_factory)
             await self._finalize_db(db_session_factory)
 
@@ -167,9 +170,9 @@ class ExtractionService:
             )
 
         with ThreadPoolExecutor() as executor:
-            self.extractor.pages, self.extractor.page_image_metadata = await loop.run_in_executor(
-                executor, _extract
-            )
+            result = await loop.run_in_executor(executor, _extract)
+
+        self.extractor.pages, self.extractor.page_image_metadata, self.page_blocks_list = result
         logger.info(f"[PDF] Extracted {len(self.extractor.pages)} pages")
 
     async def _update_db_status(self, status: str, db_session_factory) -> None:
@@ -214,6 +217,22 @@ class ExtractionService:
         )
         logger.info(f"[EXTRACT] {len(self.all_requirements)} requirements extracted")
 
+    async def _refine_page_numbers(self) -> None:
+        """Use page_finder to assign source_page for requirements missing it."""
+        from src.page_finder import assign_page_numbers_to_requirements
+
+        sorted_pages = sorted(self.extractor.pages, key=lambda p: p["page_number"])
+        page_texts = [p["text"] for p in sorted_pages]
+        missing = [r for r in self.all_requirements if not (getattr(r, "source_page", None))]
+        if missing and page_texts:
+            assign_page_numbers_to_requirements(
+                missing,
+                page_texts,
+                page_start=1,
+                min_keyword_score=50.0,
+            )
+            logger.info(f"[PAGE_FINDER] Refined page numbers for {len(missing)} requirements")
+
     async def _save_to_db(self, db_session_factory) -> None:
         if not self.db_document:
             self.total_requirements_saved = len(self.all_requirements)
@@ -239,6 +258,22 @@ class ExtractionService:
         except Exception as e:
             logger.error(f"[DB] Failed to save requirements: {e}", exc_info=True)
             self.total_requirements_saved = len(self.all_requirements)
+
+    async def _save_document_pages(self, db_session_factory) -> None:
+        """Persist per-page text + text_blocks to document_pages table."""
+        if not self.db_document or not self.page_blocks_list:
+            return
+        from src.database import crud
+        try:
+            with db_session_factory() as db:
+                saved = crud.bulk_create_document_pages(
+                    db=db,
+                    document_id=self.db_document.id,
+                    pages=self.page_blocks_list,
+                )
+            logger.info(f"[DB] Saved {saved} document_pages records")
+        except Exception as e:
+            logger.error(f"[DB] Failed to save document_pages: {e}", exc_info=True)
 
     async def _save_coverage_metrics(self, db_session_factory) -> None:
         if not self.db_document:

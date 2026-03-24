@@ -131,8 +131,10 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { dashboardApi, projectsApi } from '@/services/api'
 import { useNotificationsStore } from '@/stores/notifications'
+import { useDictionariesStore } from '@/stores/dictionaries'
 
 const notifications = useNotificationsStore()
+const dicts = useDictionariesStore()
 const loading = ref(true)
 const projects = ref([])
 
@@ -142,23 +144,8 @@ const stats = reactive({
   recent_requirements: [],
 })
 
-const statusLabels = {
-  pending: 'Ожидает',
-  accepted: 'Принято',
-  rejected: 'Отклонено',
-  modified: 'Изменено',
-  in_progress: 'В работе',
-  done: 'Выполнено',
-  blocked: 'Заблокировано',
-  unknown: 'Неизвестно',
-}
-
-const statusLabel = (s) => statusLabels[s] || s || 'Неизвестно'
-
-const statusColor = (s) => {
-  const colors = { pending: 'grey', accepted: 'green', rejected: 'red', modified: 'blue', in_progress: 'orange', done: 'green', blocked: 'red' }
-  return colors[s] || 'grey'
-}
+const statusLabel = (s) => dicts.statusName(s) || s || 'Неизвестно'
+const statusColor  = (s) => dicts.statusColor(s) || 'grey'
 
 const doneCount = computed(() => {
   return stats.by_status

@@ -1,17 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import ProjectsView from '../views/ProjectsView.vue'
-import ProjectView from '../views/ProjectView.vue'
-import HomeView from '../views/HomeView.vue'
-import ReviewView from '../views/ReviewView.vue'
-import AdminView from '../views/AdminView.vue'
-import RequirementDetailView from '../views/RequirementDetailView.vue'
-import DashboardRouterView from '../views/DashboardRouterView.vue'
-import ActivityView from '../views/ActivityView.vue'
-import AllRequirementsView from '../views/AllRequirementsView.vue'
-import PromptsView from '../views/PromptsView.vue'
-import LoginView from '../views/LoginView.vue'
-import UsersView from '../views/UsersView.vue'
+import ProjectsView from '@/views/ProjectsView.vue'
+import ProjectView from '@/views/ProjectView.vue'
+import HomeView from '@/views/HomeView.vue'
+import ReviewView from '@/views/ReviewView.vue'
+import AdminView from '@/views/AdminView.vue'
+import RequirementDetailView from '@/views/RequirementDetailView.vue'
+import DashboardRouterView from '@/views/DashboardRouterView.vue'
+import ActivityView from '@/views/ActivityView.vue'
+import AllRequirementsView from '@/views/AllRequirementsView.vue'
+import PromptsView from '@/views/PromptsView.vue'
+import LoginView from '@/views/LoginView.vue'
+import UsersView from '@/views/UsersView.vue'
 
 const routes = [
   {
@@ -37,7 +37,7 @@ const routes = [
   },
   {
     path: '/upload',
-    name: 'home',
+    name: 'upload',
     component: HomeView,
     meta: { requiresRole: 'manager' }
   },

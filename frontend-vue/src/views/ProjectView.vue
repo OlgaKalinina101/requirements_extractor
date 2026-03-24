@@ -122,16 +122,18 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useProjectsStore } from '../stores/projects'
+import { useRouter } from 'vue-router'
+import { useProjectsStore } from '@/stores/projects'
 import { useAuthStore } from '@/stores/auth'
+import { useNotificationsStore } from '@/stores/notifications'
 import { usersApi } from '@/services/api'
-import DocumentUpload from '../components/DocumentUpload.vue'
+import DocumentUpload from '@/components/DocumentUpload.vue'
+import { formatDate, getDocStatusIcon, getDocStatusColor, getDocStatusText } from '@/utils/formatters'
 
-const route = useRoute()
-const router = useRouter()
+const router        = useRouter()
 const projectsStore = useProjectsStore()
-const auth = useAuthStore()
+const auth          = useAuthStore()
+const notifications = useNotificationsStore()
 
 const props = defineProps({
   projectId: { type: [String, Number], required: true }
@@ -159,7 +161,7 @@ const onRequirementManagerChange = async (value) => {
     })
     project.value = { ...project.value, ...updated }
   } catch (e) {
-    console.error('Failed to update requirement manager', e)
+    notifications.notifyError('Не удалось сохранить менеджера требований')
   } finally {
     savingRequirementManager.value = false
   }
@@ -198,31 +200,16 @@ const onResultsHidden = () => {
   refreshProject()
 }
 
+const getStatusIcon  = getDocStatusIcon
+const getStatusColor = getDocStatusColor
+const getStatusText  = getDocStatusText
+
 const formatDocSubtitle = (doc) => {
   const parts = []
-  if (doc.total_pages) parts.push(`${doc.total_pages} стр.`)
-  if (doc.requirements_count) parts.push(`${doc.requirements_count} треб.`)
-  if (doc.uploaded_at) {
-    parts.push(new Date(doc.uploaded_at).toLocaleDateString('ru-RU', {
-      day: '2-digit', month: '2-digit', year: 'numeric'
-    }))
-  }
+  if (doc.total_pages)         parts.push(`${doc.total_pages} стр.`)
+  if (doc.requirements_count)  parts.push(`${doc.requirements_count} треб.`)
+  if (doc.uploaded_at)         parts.push(formatDate(doc.uploaded_at))
   return parts.join(' \u2022 ')
-}
-
-const getStatusIcon = (status) => {
-  const icons = { pending: 'mdi-clock-outline', processing: 'mdi-loading', completed: 'mdi-check-circle', failed: 'mdi-alert-circle' }
-  return icons[status] || 'mdi-file'
-}
-
-const getStatusColor = (status) => {
-  const colors = { pending: 'grey', processing: 'blue', completed: 'green', failed: 'red' }
-  return colors[status] || 'grey'
-}
-
-const getStatusText = (status) => {
-  const texts = { pending: 'Ожидает', processing: 'Обработка', completed: 'Готово', failed: 'Ошибка' }
-  return texts[status] || status
 }
 
 const goToReview = (documentId) => {

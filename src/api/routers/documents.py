@@ -193,6 +193,28 @@ async def get_metrics(document_id: int, db=Depends(get_db), _current=Depends(get
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{document_id}/pages/{page_number}")
+async def get_document_page(
+    document_id: int,
+    page_number: int,
+    db=Depends(get_db),
+    _current=Depends(get_current_user),
+):
+    """Get text blocks and OCR data for a specific page (used for highlight overlay)."""
+    try:
+        page = crud.get_document_page(db, document_id, page_number)
+        if not page:
+            return {"text_blocks": [], "raw_text": "", "is_ocr": False}
+        return {
+            "text_blocks": page.text_blocks or [],
+            "raw_text": page.raw_text or "",
+            "is_ocr": page.is_ocr,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get page {page_number} for document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.api_route("/{document_id}/pdf", methods=["GET", "HEAD"])
 async def get_document_pdf(document_id: int, request: Request, db=Depends(get_db), _current=Depends(get_current_user)):
     """Get PDF file for document viewer. HEAD supported for content-type check."""

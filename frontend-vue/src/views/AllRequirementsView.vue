@@ -168,12 +168,12 @@
     </div>
 
     <!-- Requirement card modal (on click, centered) -->
-    <v-dialog v-model="reqCardDrawer.show" max-width="520" transition="dialog-transition">
-      <v-card v-if="reqCardDrawer.req">
+    <v-dialog v-model="reqCardShow" max-width="680" transition="dialog-transition">
+      <v-card v-if="reqCardReq">
         <v-card-title class="d-flex align-center">
-          <span class="text-h6">{{ reqCardDrawer.req.requirement_id }}</span>
+          <span class="text-h6">{{ reqCardReq.requirement_id }}</span>
           <v-spacer />
-          <v-btn icon variant="text" @click="reqCardDrawer.show = false">
+          <v-btn icon variant="text" @click="reqCardShow = false">
             <v-icon>mdi-close</v-icon>
           </v-btn>
         </v-card-title>
@@ -185,11 +185,35 @@
               <li v-for="(item, i) in reqModalContent.subitems" :key="i">{{ item }}</li>
             </ul>
           </div>
+
+          <!-- Live status / meta chips — update immediately after actions -->
           <v-chip-group class="mb-3">
-            <v-chip size="small" :color="dicts.statusColor(reqCardDrawer.req.status)" variant="flat">{{ dicts.statusName(reqCardDrawer.req.status) }}</v-chip>
-            <v-chip v-if="reqCardDrawer.req.type" size="small" :color="dicts.typeColor(reqCardDrawer.req.type)" variant="tonal">{{ dicts.typeName(reqCardDrawer.req.type) }}</v-chip>
-            <v-chip v-if="reqCardDrawer.req.priority" size="small" :color="dicts.priorityColor(reqCardDrawer.req.priority)" variant="tonal">{{ dicts.priorityName(reqCardDrawer.req.priority) }}</v-chip>
-            <v-chip v-if="reqCardDrawer.req.discipline" size="small" variant="tonal" color="grey">{{ reqCardDrawer.req.discipline }}</v-chip>
+            <v-chip size="small" :color="dicts.statusColor(reqCardReq.status)" variant="flat">
+              {{ dicts.statusName(reqCardReq.status) }}
+            </v-chip>
+            <v-chip v-if="reqCardReq.type" size="small" :color="dicts.typeColor(reqCardReq.type)" variant="tonal">
+              {{ dicts.typeName(reqCardReq.type) }}
+            </v-chip>
+            <v-chip v-if="reqCardReq.priority" size="small" :color="dicts.priorityColor(reqCardReq.priority)" variant="tonal">
+              {{ dicts.priorityName(reqCardReq.priority) }}
+            </v-chip>
+            <v-chip v-if="reqCardReq.discipline" size="small" variant="tonal" color="grey">
+              {{ reqCardReq.discipline }}
+            </v-chip>
+            <v-chip
+              v-if="reqCardReq.assignee_id"
+              size="small"
+              variant="tonal"
+              color="blue"
+              prepend-icon="mdi-account"
+            >
+              {{ allUsers.find(u => u.id === reqCardReq.assignee_id)?.full_name
+                 || allUsers.find(u => u.id === reqCardReq.assignee_id)?.email
+                 || `#${reqCardReq.assignee_id}` }}
+            </v-chip>
+            <v-chip v-else size="small" variant="tonal" color="grey" prepend-icon="mdi-account-off">
+              Не назначен
+            </v-chip>
           </v-chip-group>
 
           <v-divider class="my-3" />
@@ -203,8 +227,8 @@
                 <v-list-item
                   v-for="s in allStatusOptions"
                   :key="s.value"
-                  @click="changeStatus(reqCardDrawer.req, s.value)"
-                  :disabled="reqCardDrawer.req.status === s.value"
+                  @click="changeStatus(reqCardReq, s.value)"
+                  :disabled="reqCardReq.status === s.value"
                 >
                   <v-list-item-title>{{ s.title }}</v-list-item-title>
                 </v-list-item>
@@ -215,43 +239,43 @@
                 <v-btn v-bind="props" size="small" variant="outlined" prepend-icon="mdi-account-plus">Назначить</v-btn>
               </template>
               <v-list density="compact">
-                <v-list-item @click="assignUser(reqCardDrawer.req, null)">
+                <v-list-item @click="assignUser(reqCardReq, null)">
                   <v-list-item-title>— Снять</v-list-item-title>
                 </v-list-item>
-                <v-list-item v-for="u in usersForAssign" :key="u.id" @click="assignUser(reqCardDrawer.req, u.id)">
+                <v-list-item v-for="u in usersForAssign" :key="u.id" @click="assignUser(reqCardReq, u.id)">
                   <v-list-item-title>{{ u.full_name || u.email }}</v-list-item-title>
                 </v-list-item>
               </v-list>
             </v-menu>
-            <v-btn v-if="auth.isManager" size="small" variant="outlined" prepend-icon="mdi-pencil" @click="openEdit(reqCardDrawer.req)">
+            <v-btn v-if="auth.isManager" size="small" variant="outlined" prepend-icon="mdi-pencil" @click="openEdit(reqCardReq)">
               Редактировать
             </v-btn>
-            <v-btn size="small" color="primary" variant="flat" :to="{ path: `/requirement/${reqCardDrawer.req.id}`, query: { from: 'requirements' } }">
+            <v-btn size="small" color="primary" variant="flat" :to="{ path: `/requirement/${reqCardReq.id}`, query: { from: 'requirements' } }">
               Подробнее
             </v-btn>
           </div>
 
           <!-- Hierarchy & links -->
-          <div v-if="reqCardDrawer.req.parent_id || (reqCardDrawer.req.children && reqCardDrawer.req.children.length) || (reqCardDrawer.req.outgoing_links && reqCardDrawer.req.outgoing_links.length) || (reqCardDrawer.req.incoming_links && reqCardDrawer.req.incoming_links.length)" class="mt-4">
+          <div v-if="reqCardReq.parent_id || reqCardReq.children?.length || reqCardReq.outgoing_links?.length || reqCardReq.incoming_links?.length" class="mt-4">
             <v-divider class="mb-2" />
             <div class="text-caption text-medium-emphasis mb-2">Связи</div>
             <div class="hierarchy-links">
-              <template v-if="reqCardDrawer.req.parent_id">
-                <router-link :to="`/requirement/${reqCardDrawer.req.parent_id}`" class="hierarchy-chip parent">
+              <template v-if="reqCardReq.parent_id">
+                <router-link :to="`/requirement/${reqCardReq.parent_id}`" class="hierarchy-chip parent">
                   <v-icon size="12">mdi-arrow-up-bold</v-icon>
-                  {{ reqCardDrawer.req.parent_requirement_id || '#' + reqCardDrawer.req.parent_id }}
+                  {{ reqCardReq.parent_requirement_id || '#' + reqCardReq.parent_id }}
                 </router-link>
               </template>
-              <template v-if="reqCardDrawer.req.children && reqCardDrawer.req.children.length">
-                <router-link v-for="ch in reqCardDrawer.req.children" :key="ch.id" :to="`/requirement/${ch.id}`" class="hierarchy-chip child">
+              <template v-if="reqCardReq.children?.length">
+                <router-link v-for="ch in reqCardReq.children" :key="ch.id" :to="`/requirement/${ch.id}`" class="hierarchy-chip child">
                   <v-icon size="12">mdi-arrow-down-bold</v-icon>
                   {{ ch.requirement_id }}
                 </router-link>
               </template>
-              <template v-for="lnk in (reqCardDrawer.req.outgoing_links || [])" :key="'out-' + lnk.id">
+              <template v-for="lnk in (reqCardReq.outgoing_links || [])" :key="'out-' + lnk.id">
                 <router-link :to="`/requirement/${lnk.requirement_id}`" class="hierarchy-chip link-out">{{ lnk.requirement_requirement_id }} ({{ dicts.linkTypeName(lnk.link_type) }})</router-link>
               </template>
-              <template v-for="lnk in (reqCardDrawer.req.incoming_links || [])" :key="'in-' + lnk.id">
+              <template v-for="lnk in (reqCardReq.incoming_links || [])" :key="'in-' + lnk.id">
                 <router-link :to="`/requirement/${lnk.requirement_id}`" class="hierarchy-chip link-in">{{ lnk.requirement_requirement_id }} ({{ dicts.linkTypeName(lnk.link_type) }})</router-link>
               </template>
             </div>
@@ -507,7 +531,7 @@ const scrollToReqId = computed(() => {
   return id ? Number(id) : null
 })
 
-const reqModalContent = computed(() => getDisplayContent(reqCardDrawer.req))
+const reqModalContent = computed(() => getDisplayContent(reqCardReq.value))
 
 const documentOptions = computed(() => {
   const projMap = Object.fromEntries(allProjects.value.map(p => [p.id, p.name]))
@@ -566,19 +590,6 @@ const getDisplayContent = (req) => {
   return { intro: req.text || '', subitems: req.subitems || [] }
 }
 
-const userName = (id) => {
-  if (!id) return ''
-  const u = allUsers.value.find(u => u.id === id)
-  return u ? (u.full_name || u.email) : `#${id}`
-}
-
-const rowBgClass = (status) => {
-  if (status === 'accepted') return 'bg-green-lighten-5'
-  if (status === 'rejected') return 'bg-red-lighten-5'
-  if (status === 'modified') return 'bg-blue-lighten-5'
-  return ''
-}
-
 // ---------- fetch ----------
 let searchTimeout = null
 
@@ -623,6 +634,7 @@ const changeStatus = async (req, newStatus) => {
   try {
     await requirementsApi.setStatus(req.id, newStatus)
     req.status = newStatus
+    notify.notifySuccess(`Статус изменён: ${dicts.statusName(newStatus)}`)
   } catch {
     notify.notifyError('Не удалось изменить статус')
   }
@@ -632,17 +644,28 @@ const assignUser = async (req, userId) => {
   try {
     await requirementsApi.assign(req.id, userId)
     req.assignee_id = userId
+    const user = allUsers.value.find(u => u.id === userId)
+    notify.notifySuccess(userId ? `Назначен: ${user?.full_name || user?.email}` : 'Исполнитель снят')
   } catch {
     notify.notifyError('Не удалось назначить ответственного')
   }
 }
 
 // -- Requirement card drawer --
-const reqCardDrawer = reactive({ show: false, req: null })
+// We store only the ID; the actual req is computed from the live requirements array
+// so that any mutation (status, assignee) is immediately reflected in the modal.
+const reqCardShow = ref(false)
+const reqCardId   = ref(null)
+
+const reqCardReq = computed(() =>
+  reqCardId.value != null
+    ? requirements.value.find(r => r.id === reqCardId.value) ?? null
+    : null
+)
 
 const openReqCard = (req) => {
-  reqCardDrawer.req = req
-  reqCardDrawer.show = true
+  reqCardId.value  = req.id
+  reqCardShow.value = true
 }
 
 // -- Edit --

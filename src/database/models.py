@@ -94,6 +94,7 @@ class Document(Base):
     sections = relationship("Section", back_populates="document", cascade="all, delete-orphan")
     requirements = relationship("Requirement", back_populates="document", cascade="all, delete-orphan")
     coverage_metrics = relationship("CoverageMetrics", back_populates="document", cascade="all, delete-orphan", uselist=False)
+    pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
 
 
 class Section(Base):
@@ -172,6 +173,7 @@ class Requirement(Base):
     ai_suggested = Column(Text, nullable=False)  # Original AI text
     human_edited = Column(Text, nullable=True)  # Human-edited version
     edit_reason = Column(Text, nullable=True)
+    source_quote = Column(Text, nullable=True)  # Short verbatim quote from source
     edited_by = Column(String(255), nullable=True)
     edited_at = Column(DateTime, nullable=True)
     
@@ -301,6 +303,45 @@ class RequirementHistory(Base):
     # Relationships
     requirement = relationship("Requirement", back_populates="history")
     user = relationship("User", back_populates="requirement_history")
+
+
+class DocumentPage(Base):
+    """Raw page text and word-level bounding boxes for a document page.
+
+    Populated during PDF extraction for every page — regardless of whether
+    the page was text-based or required OCR.  The ``text_blocks`` JSON array
+    is the canonical source for frontend highlighting: each element carries
+    the recognised text fragment and its position on the page.
+
+    Attributes:
+        id:            Primary key.
+        document_id:   FK to documents.
+        page_number:   1-based page index.
+        raw_text:      Full page text as a single string (for FTS / LLM).
+        text_blocks:   JSON list of dicts:
+                       [{text, x0, y0, x1, y1, block_type}, ...]
+                       where x0/y0/x1/y1 are in PDF points (72 dpi).
+        is_ocr:        True when the page had no embedded text and was
+                       processed by easyocr instead of pymupdf.
+        created_at:    Row creation timestamp.
+    """
+
+    __tablename__ = "document_pages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(
+        Integer,
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    page_number = Column(Integer, nullable=False)
+    raw_text = Column(Text, nullable=True)
+    text_blocks = Column(JSON, nullable=True)
+    is_ocr = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    document = relationship("Document", back_populates="pages")
 
 
 class Prompt(Base):

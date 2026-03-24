@@ -160,7 +160,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import api from '@/services/api'
 import { useNotificationsStore } from '@/stores/notifications'
 

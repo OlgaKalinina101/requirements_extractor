@@ -137,7 +137,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { documentsApi } from '../services/api'
+import { documentsApi } from '@/services/api'
 
 const props = defineProps({
   documentId: {

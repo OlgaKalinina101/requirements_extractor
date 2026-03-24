@@ -166,31 +166,24 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useProjectsStore } from '../stores/projects'
+import { useProjectsStore } from '@/stores/projects'
 import { useAuthStore } from '@/stores/auth'
+import { useNotificationsStore } from '@/stores/notifications'
 import { usersApi } from '@/services/api'
+import { formatDate } from '@/utils/formatters'
 
 const router = useRouter()
-const projectsStore = useProjectsStore()
-const auth = useAuthStore()
+const projectsStore  = useProjectsStore()
+const auth           = useAuthStore()
+const notifications  = useNotificationsStore()
 
 const showCreateDialog = ref(false)
 const showDeleteDialog = ref(false)
-const projectToDelete = ref(null)
-const creating = ref(false)
+const projectToDelete  = ref(null)
+const creating         = ref(false)
 const newProject = ref({ name: '', code: '', description: '', requirement_manager_id: null })
-const usersForSelect = ref([])
 
-const userSelectOptions = ref([
-  { title: 'Не назначен', value: null },
-])
-
-const formatDate = (dateString) => {
-  if (!dateString) return ''
-  return new Date(dateString).toLocaleDateString('ru-RU', {
-    day: '2-digit', month: '2-digit', year: 'numeric'
-  })
-}
+const userSelectOptions = ref([{ title: 'Не назначен', value: null }])
 
 const goToProject = (id) => {
   router.push(`/projects/${id}`)
@@ -209,7 +202,7 @@ const createProject = async () => {
     newProject.value = { name: '', code: '', description: '', requirement_manager_id: null }
     router.push(`/projects/${created.id}`)
   } catch (e) {
-    alert(projectsStore.error || 'Ошибка создания проекта')
+    notifications.notifyError(projectsStore.error || 'Ошибка создания проекта')
   } finally {
     creating.value = false
   }
@@ -225,7 +218,7 @@ const doDelete = async () => {
   try {
     await projectsStore.deleteProject(projectToDelete.value.id)
   } catch (e) {
-    alert('Ошибка удаления')
+    notifications.notifyError(projectsStore.error || 'Ошибка удаления')
   }
   showDeleteDialog.value = false
   projectToDelete.value = null

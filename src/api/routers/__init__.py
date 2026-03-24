@@ -13,6 +13,7 @@ from .download import router as download_router
 from .dictionaries import router as dictionaries_router
 from .comments import router as comments_router
 from .prompts import router as prompts_router
+from .models import router as models_router
 
 __all__ = [
     "health_router",
@@ -28,4 +29,5 @@ __all__ = [
     "dictionaries_router",
     "comments_router",
     "prompts_router",
+    "models_router",
 ]

@@ -321,6 +321,8 @@ def bulk_create_requirements(
             "page_number": req.source_page if hasattr(req, "source_page") else req.page_number,
             "bbox": None,
             "subitems": req.subitems if hasattr(req, "subitems") else None,
+            "discipline": getattr(req, "suggested_discipline", None),
+            "source_quote": getattr(req, "source_quote", None),
         })
     logger.debug(f"[CRUD SAVE] Bulk inserting {len(requirements_data)} requirements")
     db.bulk_insert_mappings(Requirement, requirements_data)

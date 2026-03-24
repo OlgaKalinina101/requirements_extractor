@@ -66,7 +66,19 @@
               </v-col>
               <v-col cols="6" sm="3">
                 <div class="text-caption text-medium-emphasis">Дисциплина</div>
-                <div class="mt-1">{{ requirement.discipline || '—' }}</div>
+                <div class="mt-1">
+                  <v-chip
+                    v-if="requirement.discipline"
+                    size="small"
+                    variant="tonal"
+                    color="deep-purple"
+                    prepend-icon="mdi-robot-outline"
+                    :title="'Предложено AI при извлечении'"
+                  >
+                    {{ requirement.discipline }}
+                  </v-chip>
+                  <span v-else class="text-medium-emphasis">—</span>
+                </div>
               </v-col>
               <v-col cols="6" sm="3">
                 <div class="text-caption text-medium-emphasis">Метод подтверждения</div>

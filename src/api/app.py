@@ -72,9 +72,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    _raw = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8080")
+    allowed_origins = [o.strip() for o in _raw.split(",") if o.strip()]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -95,6 +98,7 @@ def create_app() -> FastAPI:
         dictionaries_router,
         comments_router,
         prompts_router,
+        models_router,
     )
 
     app.include_router(health_router)
@@ -110,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(dictionaries_router, prefix="/api/dictionaries")
     app.include_router(comments_router, prefix="/api/comments")
     app.include_router(prompts_router, prefix="/api/prompts")
+    app.include_router(models_router, prefix="/api")
 
     return app
 

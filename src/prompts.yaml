@@ -72,6 +72,13 @@ requirement_extractor_text:
     4. Номер страницы, колонтитулы, реквизиты документа, оглавление.
     5. Фрагменты в начале страницы (или раздела), которые явно являются продолжением с предыдущей страницы: продолжение перечня без вводной фразы, остаток оборванного предложения, элементы списка без общего заголовка. Если контекст или начало формулировки находится на предыдущей странице, не извлекай такой фрагмент — он неполон и может дублировать требование, уже извлечённое из предыдущей страницы.
 
+    Как определять suggested_discipline:
+    Укажи инженерную дисциплину, к которой относится требование. Используй одно из типичных значений:
+    "Электрика", "КИПиА", "Механика", "Технологический процесс", "Строительство",
+    "Телекоммуникации", "Пожарная безопасность", "HVAC", "Экология", "Безопасность",
+    "Документация", "Общие требования" — или другую релевантную дисциплину.
+    Если дисциплину нельзя определить уверенно, используй null.
+
     Правила атомарности:
     - Один объект JSON = одно самостоятельное требование.
     - Если требование задано общей обязательной вводной фразой и далее раскрывается списком, извлекай его как одно составное требование.
@@ -111,6 +118,7 @@ requirement_extractor_text:
         "source_fragment": "Короткое описание места в разделе или подпункта",
         "requirement_kind": "Supply|Technical|Functional|Performance|Safety|Documentation|Interface|Constraint|Process|Unknown",
         "priority": "Mandatory|Recommended|Optional|Unknown",
+        "suggested_discipline": "Электрика|КИПиА|Механика|Технологический процесс|Строительство|Телекоммуникации|Пожарная безопасность|HVAC|Экология|Безопасность|Документация|Общие требования|null",
         "confidence": 0.95,
         "extraction_basis": "explicit|list_item|list_block|table|inferred_from_mandatory_context"
       }}
@@ -139,6 +147,7 @@ requirement_extractor_text:
         "source_fragment": "Состав поставки",
         "requirement_kind": "Supply",
         "priority": "Mandatory",
+        "suggested_discipline": "Механика",
         "confidence": 0.98,
         "extraction_basis": "list_block"
       }}
@@ -165,6 +174,7 @@ requirement_extractor_text:
         "source_fragment": "Функциональные требования",
         "requirement_kind": "Functional",
         "priority": "Mandatory",
+        "suggested_discipline": "КИПиА",
         "confidence": 0.98,
         "extraction_basis": "list_block"
       }}
@@ -185,6 +195,7 @@ requirement_extractor_text:
         "source_fragment": "Технические требования",
         "requirement_kind": "Technical",
         "priority": "Mandatory",
+        "suggested_discipline": "Электрика",
         "confidence": 0.97,
         "extraction_basis": "list_item"
       }},
@@ -196,6 +207,7 @@ requirement_extractor_text:
         "source_fragment": "Технические требования",
         "requirement_kind": "Technical",
         "priority": "Mandatory",
+        "suggested_discipline": "Электрика",
         "confidence": 0.97,
         "extraction_basis": "list_item"
       }}
@@ -295,6 +307,13 @@ requirement_extractor_image:
     4. Легенды и текстовые обозначения, если они задают обязательный тип линии, сигнала, подключения или элемента.
     5. Групповые блоки состава/перечня, если обязательность задана общей вводной формулировкой.
 
+    Как определять suggested_discipline:
+    Укажи инженерную дисциплину, к которой относится требование. Используй одно из типичных значений:
+    "Электрика", "КИПиА", "Механика", "Технологический процесс", "Строительство",
+    "Телекоммуникации", "Пожарная безопасность", "HVAC", "Экология", "Безопасность",
+    "Документация", "Общие требования" — или другую релевантную дисциплину.
+    Если дисциплину нельзя определить уверенно, используй null.
+
     Что НЕ считать требованием:
     1. Просто наличие на схеме графического элемента без читаемого текстового смысла.
     2. Неразборчивые подписи, теги и выноски.
@@ -372,6 +391,7 @@ requirement_extractor_image:
         "visual_requirement_class": "signal_table|equipment_list|callout_note|layout_constraint|unknown",
         "requirement_kind": "Supply|Technical|Functional|Performance|Safety|Documentation|Interface|Constraint|Process|Unknown",
         "priority": "Mandatory|Recommended|Optional|Unknown",
+        "suggested_discipline": "Электрика|КИПиА|Механика|Технологический процесс|Строительство|Телекоммуникации|Пожарная безопасность|HVAC|Экология|Безопасность|Документация|Общие требования|null",
         "confidence": 0.8,
         "extraction_basis": "image_text|table|list_block|diagram_note|callout|legend|layout_note"
       }}
@@ -405,6 +425,7 @@ requirement_extractor_image:
         "visual_requirement_class": "signal_table",
         "requirement_kind": "Interface",
         "priority": "Mandatory",
+        "suggested_discipline": "КИПиА",
         "confidence": 0.95,
         "extraction_basis": "table"
       }}
@@ -424,6 +445,7 @@ requirement_extractor_image:
         "visual_requirement_class": "callout_note",
         "requirement_kind": "Constraint",
         "priority": "Mandatory",
+        "suggested_discipline": "Строительство",
         "confidence": 0.96,
         "extraction_basis": "callout"
       }}

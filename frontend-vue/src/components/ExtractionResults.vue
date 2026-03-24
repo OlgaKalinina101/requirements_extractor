@@ -184,6 +184,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { downloadExport } from '@/services/api'
+import { useNotificationsStore } from '@/stores/notifications'
+import { MODEL_DISPLAY_NAMES } from '@/utils/constants'
 
 const props = defineProps({
   results: {
@@ -194,20 +196,15 @@ const props = defineProps({
 
 defineEmits(['view-requirements', 'close'])
 
+const notifications = useNotificationsStore()
+
 const formatNumber = (num) => num.toLocaleString()
 
-const modelDisplayNames = {
-  'claude-sonnet-4.5': 'Claude Sonnet 4.5',
-  'claude-opus-4.6': 'Claude Opus 4.6',
-  'gpt-4.1': 'GPT-4.1',
-  'qwen-3.5-plus': 'Qwen 3.5 Plus',
-  'gemini-3.1-pro': 'Gemini 3.1 Pro'
-}
-
-const displayModelName = computed(() => {
-  if (!props.results?.model_used) return 'Unknown'
-  return modelDisplayNames[props.results.model_used] || props.results.model_used
-})
+const displayModelName = computed(() =>
+  props.results?.model_used
+    ? (MODEL_DISPLAY_NAMES[props.results.model_used] || props.results.model_used)
+    : 'Unknown'
+)
 
 const exportingFormat = ref(null)
 
@@ -217,7 +214,7 @@ async function triggerExport(format) {
   try {
     await downloadExport(props.results.document_id, format)
   } catch (e) {
-    console.error('Export failed', e)
+    notifications.notifyError(`Ошибка экспорта: ${e.response?.data?.detail || e.message}`)
   } finally {
     exportingFormat.value = null
   }
